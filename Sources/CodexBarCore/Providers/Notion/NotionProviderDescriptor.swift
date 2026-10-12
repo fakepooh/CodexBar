@@ -89,7 +89,10 @@ public enum NotionProviderDescriptor {
                     }
                     return ProviderSemanticWindows(session: rolling, weekly: monthly)
                 },
-                menuBarLayoutSecondaryLabel: "Monthly"),
+                menuBarLayoutSecondaryLabel: "Monthly",
+                menuBarBalanceDetailLabels: ["Remaining credits"],
+                optionalDetails: ProviderOptionalDetailsPresentation(
+                    hiddenTitlesWithoutOptionalUsage: ["Notion Credits"])),
             fetchPlan: ProviderFetchPlan(
                 sourceModes: [.auto, .web],
                 pipeline: ProviderFetchPipeline(resolveStrategies: { context in

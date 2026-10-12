@@ -7,6 +7,41 @@ import Testing
 struct MenuBarLayoutProviderBalanceTests {
     private let now = Date(timeIntervalSince1970: 1_752_768_000)
 
+    @Test(arguments: ["7,850.5", "0", nil] as [String?])
+    func `Notion balance token is independent of automatic allowance percentages`(balance: String?) throws {
+        let sections = try balance.map { value in
+            try [ProviderDetailSection(title: "Notion Credits", rows: [
+                .init(label: "Remaining credits", value: value),
+            ])]
+        } ?? []
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 42, windowMinutes: 360, resetsAt: nil, resetDescription: nil),
+            secondary: RateWindow(usedPercent: 18, windowMinutes: 43200, resetsAt: nil, resetDescription: nil),
+            details: sections,
+            updatedAt: self.now,
+            identity: ProviderIdentitySnapshot(
+                providerID: .notion, accountEmail: nil, accountOrganization: nil, loginMethod: "Business"))
+        let data = self.data(provider: .notion, snapshot: snapshot)
+        #expect(data.balance == balance)
+        #expect(data.automaticText == nil)
+        #expect(self.render(layout: MenuBarLayout(lines: [[.balance]]), data: data)
+            .attributedTitle.string == (balance ?? "–"))
+        #expect(self.render(layout: MenuBarLayout(lines: [[.percent(window: .automatic)]]), data: data)
+            .attributedTitle.string == "42%")
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .claude, snapshot: snapshot) == nil)
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .codex, snapshot: snapshot) == nil)
+        #expect(!NotionProviderDescriptor.descriptor.metadata.supportsCredits)
+
+        let foreign = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            details: sections,
+            updatedAt: self.now,
+            identity: ProviderIdentitySnapshot(
+                providerID: .codex, accountEmail: nil, accountOrganization: nil, loginMethod: nil))
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .notion, snapshot: foreign) == nil)
+    }
+
     @Test(arguments: BundledPluginTestSupport.engines)
     func `Nous reported credits reach balance and automatic tokens`(engine: ProviderPluginEngineKind) async throws {
         let snapshot = try await NousPluginTests.fetch(Self.nousCreditsAccount, engine: engine)

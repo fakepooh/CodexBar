@@ -27,12 +27,16 @@ struct NotionMenuCardModelTests {
             updatedAt: self.now)
     }
 
-    private static func model(weeklyPace: UsagePace?) throws -> UsageMenuCardView.Model {
+    private static func model(
+        weeklyPace: UsagePace?,
+        snapshot: UsageSnapshot = Self.snapshot(),
+        showOptional: Bool = true) throws -> UsageMenuCardView.Model
+    {
         let metadata = try #require(ProviderDefaults.metadata[.notion])
         return UsageMenuCardView.Model.make(.init(
             provider: .notion,
             metadata: metadata,
-            snapshot: Self.snapshot(),
+            snapshot: snapshot,
             credits: nil,
             creditsError: nil,
             dashboardError: nil,
@@ -44,7 +48,7 @@ struct NotionMenuCardModelTests {
             usageBarsShowUsed: true,
             resetTimeDisplayStyle: .countdown,
             tokenCostUsageEnabled: false,
-            showOptionalCreditsAndExtraUsage: true,
+            showOptionalCreditsAndExtraUsage: showOptional,
             hidePersonalInfo: false,
             weeklyPace: weeklyPace,
             now: Self.now))
@@ -85,5 +89,27 @@ struct NotionMenuCardModelTests {
 
         // Five of the six rolling hours elapsed against 50% used.
         #expect(metric.detailLeftText == "33% in reserve")
+    }
+
+    @Test(arguments: ["7,850.5", "0", nil] as [String?])
+    func `premium balance renders as a separate text section without a fabricated gauge`(balance: String?) throws {
+        let base = Self.snapshot()
+        let sections = try balance.map { value in
+            try [ProviderDetailSection(title: "Notion Credits", rows: [
+                .init(label: "Remaining credits", value: value),
+            ])]
+        } ?? []
+        let snapshot = UsageSnapshot(
+            primary: base.primary, secondary: base.secondary, details: sections, updatedAt: Self.now)
+        let model = try Self.model(weeklyPace: nil, snapshot: snapshot)
+        #expect(model.metrics.map(\.id) == ["primary", "secondary"])
+        #expect(model.providerDetails.first?.title == (balance == nil ? nil : "Notion Credits"))
+        #expect(model.providerDetails.first?.rows.first?.value == balance)
+        #expect(model.providerDetails.first?.rows.first?.progress == nil)
+        #expect(model.creditsText == nil)
+        #expect(model.cloudCredits == nil)
+        let hidden = try Self.model(weeklyPace: nil, snapshot: snapshot, showOptional: false)
+        #expect(hidden.providerDetails.isEmpty)
+        #expect(hidden.metrics.map(\.id) == model.metrics.map(\.id))
     }
 }

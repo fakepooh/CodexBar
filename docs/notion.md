@@ -9,7 +9,8 @@ read_when:
 # Notion AI Provider
 
 The Notion AI provider tracks the **Rolling** (6-hour) and **Monthly** (billing period) usage allowance
-windows that Notion shows in **Settings → Notion AI → Usage**.
+windows that Notion shows in **Settings → Notion AI → Usage**, plus the separate **Notion Credits**
+balance used by Custom Agents and Workers for the same selected workspace.
 
 Notion begins enforcing the AI usage allowance on **August 3, 2026**. Before that date the same endpoint
 reports `"enforcement": "preview"` while still returning real usage numbers, so the gauges are accurate
@@ -75,12 +76,16 @@ only manual paths are the Settings fields above and `config.json`.
 
 ## Data Source
 
-CodexBar sends two POST requests per refresh, both to `https://app.notion.com`:
+CodexBar sends three POST requests per successful allowance refresh, all to `https://app.notion.com`:
 
 1. `/api/v3/getSpaces` — resolves the signed-in user (email, name) and the workspaces the account can see,
    including each workspace's `plan_type` and `subscription_tier`. This is what makes automatic workspace
    selection and the account identity line possible.
 2. `/api/v3/getCreditRateLimitStatus` with `{"spaceId": "<uuid>"}` — the allowance itself.
+3. `/api/v3/getAIUsageEligibilityV2` with the same `spaceId` and cookie session — an optional premium-credit
+   balance lookup with a three-second request deadline and no retries. HTTP errors (including 401/403),
+   network failures, invalid JSON, and absent or malformed balances omit this section while preserving
+   the allowance snapshot and validated session. Refresh cancellation still propagates.
 
 The rate-limit response looks like this:
 
@@ -113,8 +118,18 @@ Usage is reported against the returned `limit` rather than assumed to be a perce
 non-100 limit keeps working. Over-quota values are preserved rather than clamped; display clamping happens
 downstream. The plugin declares `snapshotPolicy: {percent: "preserve-overage"}` to retain this behavior on both engines.
 
-Custom Agents and Workers are **not** covered by this allowance — Notion meters those with Notion credits
-(`getAIUsageEligibilityV2`), which this provider does not read.
+Custom Agents and Workers are **not** covered by these allowance windows. Their separate **Notion Credits**
+section displays only the finite numeric `premiumCredits.totalCreditBalance` as **Remaining credits**.
+An explicit zero remains visible; a missing balance is omitted. `basicCredits`, the top-level `usage` balance,
+and per-source limits are not fallbacks. The [redacted fixture in #2888](https://github.com/steipete/CodexBar/issues/2888)
+reports `monthlyAllocated.usageTotal = 560`, `limit = 300`, and both balance and overage as zero:
+subtracting usage from limit would give the wrong balance.
+
+No premium-credit percentage, reset date, usage total, or overage amount is inferred. Unlike Codex's native
+credits integration, this is a generic text detail section without a progress gauge or usage history.
+It follows the **Show optional credits and extra usage** preference. In **Menu Bar Layout**, add the existing
+**Balance** element to show the reported balance, including zero. Automatic percentages continue to select
+the allowance windows, independently of the credits balance. No new layout token or credential is needed.
 
 ### Pace
 
