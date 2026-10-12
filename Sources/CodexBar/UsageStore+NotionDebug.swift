@@ -8,7 +8,8 @@ extension UsageStore {
         notionCookieHeader: String,
         notionWorkspaceID: String) async -> String
     {
-        await runWithTimeout(seconds: 15) {
+        // Leave headroom for the optional three-second credits lookup after the required requests.
+        await runWithTimeout(seconds: 20) {
             let context = ProviderFetchContext(
                 runtime: .app,
                 sourceMode: .web,
