@@ -111,5 +111,9 @@ struct NotionMenuCardModelTests {
         let hidden = try Self.model(weeklyPace: nil, snapshot: snapshot, showOptional: false)
         #expect(hidden.providerDetails.isEmpty)
         #expect(hidden.metrics.map(\.id) == model.metrics.map(\.id))
+        let restored = try Self.model(weeklyPace: nil, snapshot: snapshot, showOptional: true)
+        #expect(restored.providerDetails.first?.rows.first?.value == balance)
+        let refreshedWithoutCredits = try Self.model(weeklyPace: nil, snapshot: base, showOptional: true)
+        #expect(refreshedWithoutCredits.providerDetails.isEmpty)
     }
 }

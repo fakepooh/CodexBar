@@ -28,6 +28,16 @@ struct MenuBarLayoutProviderBalanceTests {
             .attributedTitle.string == (balance ?? "–"))
         #expect(self.render(layout: MenuBarLayout(lines: [[.percent(window: .automatic)]]), data: data)
             .attributedTitle.string == "42%")
+        let hidden = self.data(provider: .notion, snapshot: snapshot, showOptionalUsage: false)
+        #expect(hidden.balance == nil)
+        #expect(self.render(layout: MenuBarLayout(lines: [[.balance]]), data: hidden).attributedTitle.string == "–")
+        #expect(self.render(layout: MenuBarLayout(lines: [[.percent(window: .automatic)]]), data: hidden)
+            .attributedTitle.string == "42%")
+        let restored = self.data(provider: .notion, snapshot: snapshot, showOptionalUsage: true)
+        #expect(restored.balance == balance)
+        // Automatic's balance fallback must also filter stored optional details when no window exists.
+        #expect(StatusItemController.menuBarLayoutAutomaticText(
+            provider: .notion, snapshot: snapshot, automatic: nil, showOptionalUsage: false) == nil)
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .claude, snapshot: snapshot) == nil)
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .codex, snapshot: snapshot) == nil)
         #expect(!NotionProviderDescriptor.descriptor.metadata.supportsCredits)
@@ -50,6 +60,9 @@ struct MenuBarLayoutProviderBalanceTests {
         let data = self.data(provider: .nous, snapshot: snapshot)
         #expect(data.balance == "$6.76")
         #expect(data.automaticText == "$6.76")
+        let withoutOptionalUsage = self.data(provider: .nous, snapshot: snapshot, showOptionalUsage: false)
+        #expect(withoutOptionalUsage.balance == data.balance)
+        #expect(withoutOptionalUsage.automaticText == data.automaticText)
         for token: MenuBarLayoutToken in [.balance, .percent(window: .automatic)] {
             #expect(self.render(layout: MenuBarLayout(lines: [[token]]), data: data).attributedTitle.string == "$6.76")
         }
@@ -325,7 +338,9 @@ struct MenuBarLayoutProviderBalanceTests {
             updatedAt: self.now), value)
     }
 
-    private func data(provider: UsageProvider, snapshot: UsageSnapshot) -> MenuBarLayoutRenderData {
+    private func data(
+        provider: UsageProvider, snapshot: UsageSnapshot, showOptionalUsage: Bool = true) -> MenuBarLayoutRenderData
+    {
         let automatic = MenuBarLayoutRenderWindow(MenuBarMetricWindowResolver.rateWindow(
             preference: .automatic,
             provider: provider,
@@ -347,12 +362,13 @@ struct MenuBarLayoutProviderBalanceTests {
             scopedWeeklyTitle: nil,
             automatic: automatic,
             automaticText: StatusItemController.menuBarLayoutAutomaticText(
-                provider: provider, snapshot: snapshot, automatic: automatic),
+                provider: provider, snapshot: snapshot, automatic: automatic, showOptionalUsage: showOptionalUsage),
             sessionPace: nil,
             weeklyPace: nil,
             automaticPace: nil,
             runsOut: nil,
-            balance: MenuBarLayoutBalanceResolver.balance(provider: provider, snapshot: snapshot),
+            balance: MenuBarLayoutBalanceResolver.balance(
+                provider: provider, snapshot: snapshot, showOptionalUsage: showOptionalUsage),
             costToday: nil,
             cost30d: nil,
             metrics: .unavailable)

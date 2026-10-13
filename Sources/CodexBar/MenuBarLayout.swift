@@ -607,7 +607,8 @@ enum MenuBarLayoutBalanceResolver {
     static func balance(
         provider: UsageProvider,
         snapshot: UsageSnapshot?,
-        codexCredits: CreditsSnapshot? = nil)
+        codexCredits: CreditsSnapshot? = nil,
+        showOptionalUsage: Bool = true)
         -> String?
     {
         // Provider-specific by design: shared extraction for stored layouts, previews, and legacy text.
@@ -643,8 +644,15 @@ enum MenuBarLayoutBalanceResolver {
             let descriptor = ProviderDescriptorRegistry.descriptor(for: provider)
             let labels = descriptor.presentation.menuBarBalanceDetailLabels
                 ?? (descriptor.metadata.balanceOnly ? ["Balance"] : [])
+            let policy = descriptor.presentation.optionalDetails
+            let details = (snapshot?.details ?? []).filter { section in
+                showOptionalUsage || (!policy.hidesAllWithoutOptionalUsage
+                    && section.title.map(policy.hiddenTitlesWithoutOptionalUsage.contains) != true)
+            }
             if snapshot?.identity?.providerID == nil || snapshot?.identity?.providerID == provider.instanceID,
-               let balance = labels.lazy.compactMap({ snapshot?.detailRow(label: $0)?.value }).first
+               let balance = labels.lazy.compactMap({ label in
+                   details.lazy.flatMap(\.rows).first { $0.label == label }?.value
+               }).first
             { return balance }
             guard descriptor.presentation.menuBarBalanceDetailLabels == nil else { return nil }
             guard descriptor.presentation.planRow.stripsBalancePrefix else { return nil }

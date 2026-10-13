@@ -146,7 +146,10 @@ extension NotionProviderDescriptor {
                     from: fields, allowlist: Dictionary(uniqueKeysWithValues: names.map { ($0, $0) }))
                 let encoded = (try? JSONSerialization.data(withJSONObject: headers)) ?? Data("{}".utf8)
                 return .init(
-                    settings: ["WORKSPACE_ID": settings?.workspaceID ?? ""],
+                    settings: [
+                        "WORKSPACE_ID": settings?.workspaceID ?? "",
+                        "OPTIONAL_USAGE": String(context.includeOptionalUsage),
+                    ],
                     secrets: ["HEADERS": String(data: encoded, encoding: .utf8) ?? "{}"])
             }, isEnabled: { _ in true })
     }

@@ -878,7 +878,11 @@ extension StatusItemController {
         case .mistral: self.menuBarMetricWindow(for: provider, snapshot: snapshot, now: now) == nil
         default: true
         }
-        if usesBalance, let balance = MenuBarLayoutBalanceResolver.balance(provider: provider, snapshot: snapshot) {
+        if usesBalance, let balance = MenuBarLayoutBalanceResolver.balance(
+            provider: provider,
+            snapshot: snapshot,
+            showOptionalUsage: self.settings.showOptionalCreditsAndExtraUsage)
+        {
             return balance
         }
         if provider == .kiro {
@@ -975,13 +979,15 @@ extension StatusItemController {
     nonisolated static func menuBarLayoutAutomaticText(
         provider: UsageProvider,
         snapshot: UsageSnapshot?,
-        automatic: MenuBarLayoutRenderWindow?) -> String?
+        automatic: MenuBarLayoutRenderWindow?,
+        showOptionalUsage: Bool = true) -> String?
     {
         // Provider-specific by design: DeepInfra's real billing window has no balance detail.
         let balanceOnly = provider == .deepseek
             || (provider == .deepinfra && automatic?.resetDescription != nil && automatic?.resetsAt == nil)
         guard automatic == nil || balanceOnly else { return nil }
-        return MenuBarLayoutBalanceResolver.balance(provider: provider, snapshot: snapshot)
+        return MenuBarLayoutBalanceResolver.balance(
+            provider: provider, snapshot: snapshot, showOptionalUsage: showOptionalUsage)
     }
 
     nonisolated static func extraUsageSpendDisplayText(snapshot: UsageSnapshot?) -> String? {

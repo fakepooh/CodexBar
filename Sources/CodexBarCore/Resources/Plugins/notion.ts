@@ -3,6 +3,7 @@ defineProvider({
   name: "Notion AI",
   settings: [
     { key: "WORKSPACE_ID", title: "Workspace ID", type: "plain" },
+    { key: "OPTIONAL_USAGE", title: "Optional usage", type: "plain" },
     { key: "HEADERS", title: "Captured headers", type: "secure" },
   ],
   endpoints: ["https://app.notion.com"],
@@ -149,26 +150,28 @@ defineProvider({
         // Premium credits are a separate workspace balance, not an allowance window.
         // Keep this request independent of session validation and required allowance parsing.
         const details: CodexBarDetailSection[] = [];
-        try {
-          const response = await ctx.http.post(`https://${domain}/api/v3/getAIUsageEligibilityV2`, {
-            body: { spaceId: workspace.id },
-            headers,
-            cookieSession: session.id,
-            timeoutSeconds: 3,
-          });
-          if (response.status === 200) {
-            const premium = object(object(JSON.parse(response.bodyText))?.premiumCredits);
-            const balance = premium?.totalCreditBalance;
-            if (typeof balance === "number" && Number.isFinite(balance)) {
-              details.push({
-                title: "Notion Credits",
-                rows: [{ label: "Remaining credits", value: ctx.format.number(balance) }],
-              });
+        if (ctx.settings.get("OPTIONAL_USAGE") !== "false") {
+          try {
+            const response = await ctx.http.post(`https://${domain}/api/v3/getAIUsageEligibilityV2`, {
+              body: { spaceId: workspace.id },
+              headers,
+              cookieSession: session.id,
+              timeoutSeconds: 3,
+            });
+            if (response.status === 200) {
+              const premium = object(object(JSON.parse(response.bodyText))?.premiumCredits);
+              const balance = premium?.totalCreditBalance;
+              if (typeof balance === "number" && Number.isFinite(balance)) {
+                details.push({
+                  title: "Notion Credits",
+                  rows: [{ label: "Remaining credits", value: ctx.format.number(balance) }],
+                });
+              }
             }
+          } catch (error) {
+            if ((error as CodexBarHTTPError).transportClass === "cancelled") throw error;
+            // Missing, unsupported or malformed premium-credit data must not hide the allowances.
           }
-        } catch (error) {
-          if ((error as CodexBarHTTPError).transportClass === "cancelled") throw error;
-          // Missing, unsupported or malformed premium-credit data must not hide the allowances.
         }
         const tier = text(workspace.subscription_tier)?.trim();
         const result = {

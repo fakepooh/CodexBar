@@ -207,6 +207,73 @@ struct NotionPluginTests {
         }
     }
 
+    @Test(arguments: BundledPluginTestSupport.engines)
+    func `optional usage toggles skip premium transport and fetch fresh authoritative balances`(
+        engine: ProviderPluginEngineKind) async throws
+    {
+        for (enabled, payload, expected) in [
+            (true, #"{"premiumCredits":{"totalCreditBalance":12}}"#, "12" as String?),
+            (false, Self.premiumFixture, nil),
+            (true, #"{"premiumCredits":{"totalCreditBalance":24}}"#, "24"),
+            (true, "{}", nil),
+        ] {
+            let requests = Calls()
+            let runtime = try Self.runtime(
+                engine: engine, usage: Self.allowances, credits: payload, requests: requests)
+            let snapshot = try await runtime.fetchUsage(
+                settings: ["OPTIONAL_USAGE": String(enabled)],
+                cookieSource: .manual, cookieSessionResolver: Self.session)
+            #expect(requests.values == ["getSpaces", "getCreditRateLimitStatus"]
+                + (enabled ? ["getAIUsageEligibilityV2"] : []))
+            #expect(snapshot.primary?.usedPercent == 42)
+            #expect(snapshot.secondary?.usedPercent == 18)
+            #expect(snapshot.detailRow(label: "Remaining credits")?.value == expected)
+            #expect(snapshot.details.isEmpty == (expected == nil))
+        }
+    }
+
+    @Test
+    func `descriptor forwards optional usage changes through repeated refreshes`() async throws {
+        let requests = Calls()
+        let strategy = NotionProviderDescriptor.webStrategy(transport: ProviderHTTPTransportHandler { request in
+            let endpoint = try #require(request.url?.lastPathComponent)
+            requests.append(endpoint)
+            let body: String
+            switch endpoint {
+            case "getSpaces": body = Self.spaces
+            case "getCreditRateLimitStatus": body = Self.allowances
+            case "getAIUsageEligibilityV2":
+                #expect(request.timeoutInterval == 3)
+                let count = requests.values.filter { $0 == endpoint }.count
+                body = count == 1 ? Self.premiumFixture
+                    : count == 2 ? #"{"premiumCredits":{"totalCreditBalance":24}}"# : "{}"
+            default:
+                Issue.record("Unexpected endpoint: \(endpoint)")
+                body = "{}"
+            }
+            #expect(request.value(forHTTPHeaderField: "Cookie") == "token_v2=synthetic")
+            let url = try #require(request.url)
+            return try (Data(body.utf8), #require(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
+        })
+        for (enabled, expected) in [(true, "0" as String?), (false, nil), (true, "24"), (true, nil)] {
+            let before = requests.values.count
+            let context = ProviderFetchContext(
+                runtime: .app, sourceMode: .web, includeCredits: false, includeOptionalUsage: enabled,
+                webTimeout: 15, webDebugDumpHTML: false, verbose: false, env: [:],
+                settings: .make(notion: .init(cookieSource: .manual, manualCookieHeader: "token_v2=synthetic", workspaceID: nil)),
+                fetcher: UsageFetcher(environment: [:]),
+                claudeFetcher: ClaudeUsageFetcher(browserDetection: BrowserDetection()),
+                browserDetection: BrowserDetection())
+            let snapshot = try await strategy.fetch(context).usage
+            #expect(Array(requests.values.dropFirst(before)) == ["getSpaces", "getCreditRateLimitStatus"]
+                + (enabled ? ["getAIUsageEligibilityV2"] : []))
+            #expect(snapshot.primary?.usedPercent == 42)
+            #expect(snapshot.secondary?.usedPercent == 18)
+            #expect(snapshot.detailRow(label: "Remaining credits")?.value == expected)
+        }
+    }
+
     private static let allowances = #"{"window":{"window":"6h","used":42,"limit":100},"billingPeriodWindow":{"used":18,"limit":100}}"#
 
     /// Real redacted response from steipete/CodexBar#2888. No authentication material.
@@ -262,6 +329,7 @@ struct NotionPluginTests {
         credits: String = "{}",
         creditsStatus: Int = 200,
         creditsError: URLError.Code? = nil,
+        requests: Calls? = nil,
         expectedWorkspaceID: String = "11111111-2222-3333-4444-555555555555") throws
         -> ProviderPluginRuntime
     {
@@ -273,6 +341,7 @@ struct NotionPluginTests {
                 #expect(request.httpMethod == "POST")
                 #expect(request.url?.host == "app.notion.com")
                 #expect(request.value(forHTTPHeaderField: "Cookie") == "token_v2=synthetic")
+                requests?.append(request.url?.lastPathComponent ?? "")
                 let isCredits = request.url?.lastPathComponent == "getAIUsageEligibilityV2"
                 if request.url?.lastPathComponent == "getCreditRateLimitStatus" || isCredits {
                     let body = try JSONDecoder().decode([String: String].self, from: #require(request.httpBody))
