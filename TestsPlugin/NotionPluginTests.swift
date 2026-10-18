@@ -7,7 +7,7 @@ import Testing
 
 struct NotionPluginTests {
     private static let now = Date(timeIntervalSince1970: 1_785_600_000)
-    private static let spaces = #"{"user":{"notion_user":{"user":{"value":{"value":{"id":"user","email":"fixture@example.test"}}}},"space":{"free":{"value":{"id":"00000000-0000-0000-0000-000000000000","name":"Personal","subscription_tier":"free"}},"paid":{"value":{"id":"11111111-2222-3333-4444-555555555555","name":"Fixture team","subscription_tier":"business"}}}}}"#
+    static let spaces = #"{"user":{"notion_user":{"user":{"value":{"value":{"id":"user","email":"fixture@example.test"}}}},"space":{"free":{"value":{"id":"00000000-0000-0000-0000-000000000000","name":"Personal","subscription_tier":"free"}},"paid":{"value":{"id":"11111111-2222-3333-4444-555555555555","name":"Fixture team","subscription_tier":"business"}}}}}"#
 
     @Test(arguments: BundledPluginTestSupport.engines)
     func `workspace selection identity and overage match native snapshots`(
@@ -232,8 +232,10 @@ struct NotionPluginTests {
         }
     }
 
-    @Test
-    func `descriptor forwards optional usage changes through repeated refreshes`() async throws {
+    @Test(arguments: BundledPluginTestSupport.engines)
+    func `descriptor forwards optional usage changes through repeated refreshes`(
+        engine: ProviderPluginEngineKind) async throws
+    {
         let requests = Calls()
         let strategy = NotionProviderDescriptor.webStrategy(transport: ProviderHTTPTransportHandler { request in
             let endpoint = try #require(request.url?.lastPathComponent)
@@ -256,12 +258,16 @@ struct NotionPluginTests {
             return try (Data(body.utf8), #require(HTTPURLResponse(
                 url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
         })
+        _ = try strategy.loadedRuntime(contextOptions: .production, engine: engine)
         for (enabled, expected) in [(true, "0" as String?), (false, nil), (true, "24"), (true, nil)] {
             let before = requests.values.count
             let context = ProviderFetchContext(
                 runtime: .app, sourceMode: .web, includeCredits: false, includeOptionalUsage: enabled,
                 webTimeout: 15, webDebugDumpHTML: false, verbose: false, env: [:],
-                settings: .make(notion: .init(cookieSource: .manual, manualCookieHeader: "token_v2=synthetic", workspaceID: nil)),
+                settings: .make(notion: .init(
+                    cookieSource: .manual,
+                    manualCookieHeader: "token_v2=synthetic",
+                    workspaceID: nil)),
                 fetcher: UsageFetcher(environment: [:]),
                 claudeFetcher: ClaudeUsageFetcher(browserDetection: BrowserDetection()),
                 browserDetection: BrowserDetection())
@@ -274,7 +280,7 @@ struct NotionPluginTests {
         }
     }
 
-    private static let allowances = #"{"window":{"window":"6h","used":42,"limit":100},"billingPeriodWindow":{"used":18,"limit":100}}"#
+    static let allowances = #"{"window":{"window":"6h","used":42,"limit":100},"billingPeriodWindow":{"used":18,"limit":100}}"#
 
     /// Real redacted response from steipete/CodexBar#2888. No authentication material.
     private static let premiumFixture = #"""

@@ -124,7 +124,9 @@ extension NotionProviderDescriptor {
             sourceLabel: "web",
             kind: .web,
             transport: transport,
-            timeout: max(30, timeout * 2),
+            // Preserve the required-request budget, then reserve the three-second premium lookup
+            // plus two seconds for scheduling and snapshot delivery. Other providers keep their budgets.
+            timeout: max(30, timeout * 2) + 5,
             resolveValues: { context in
                 let settings = context.settings?.notion
                 guard settings?.cookieSource != .off else { return nil }

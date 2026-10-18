@@ -131,6 +131,18 @@ It follows the **Show optional credits and extra usage** preference. In **Menu B
 **Balance** element to show the reported balance, including zero. Automatic percentages continue to select
 the allowance windows, independently of the credits balance. No new layout token or credential is needed.
 
+### Deadlines
+
+The required `getSpaces` and `getCreditRateLimitStatus` POSTs keep their 15-second HTTP deadlines.
+The optional premium POST keeps its three-second HTTP deadline and does not retry. The Notion strategy
+reserves five seconds above its existing `max(30, webTimeout * 2)` runtime budget: three for the optional
+lookup and two for scheduling and snapshot delivery. A 15-second caller configuration therefore gets
+35 seconds overall; ordinary app and CLI contexts use `webTimeout = 60` and get 125 seconds.
+Other providers retain their existing budgets. Explicit cancellation still interrupts the worker.
+
+The debug probe reports only Rolling and Monthly. It disables optional usage and retains its separate
+20-second outer deadline, so a premium lookup cannot delay that diagnostic.
+
 ### Pace
 
 Both bars carry an expected-usage estimate on the card and in `codexbar usage`, reading `n% in deficit`

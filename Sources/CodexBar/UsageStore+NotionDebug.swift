@@ -6,14 +6,17 @@ extension UsageStore {
         browserDetection: BrowserDetection,
         notionCookieSource: ProviderCookieSource,
         notionCookieHeader: String,
-        notionWorkspaceID: String) async -> String
+        notionWorkspaceID: String,
+        transport: any ProviderHTTPTransport = ProviderHTTPClient.shared,
+        probeTimeout: TimeInterval = 20) async -> String
     {
-        // Leave headroom for the optional three-second credits lookup after the required requests.
-        await runWithTimeout(seconds: 20) {
+        // This bounded diagnostic reports only allowances; optional credits cannot delay it.
+        await runWithTimeout(seconds: probeTimeout) {
             let context = ProviderFetchContext(
                 runtime: .app,
                 sourceMode: .web,
                 includeCredits: false,
+                includeOptionalUsage: false,
                 webTimeout: 15,
                 webDebugDumpHTML: false,
                 verbose: false,
@@ -26,7 +29,7 @@ extension UsageStore {
                 claudeFetcher: ClaudeUsageFetcher(browserDetection: browserDetection, environment: [:]),
                 browserDetection: browserDetection)
             do {
-                let usage = try await NotionProviderDescriptor.webStrategy().fetch(context).usage
+                let usage = try await NotionProviderDescriptor.webStrategy(transport: transport).fetch(context).usage
                 let rolling = usage.primary?.usedPercent.description ?? "unavailable"
                 let monthly = usage.secondary?.usedPercent.description ?? "unavailable"
                 return "Notion plugin fetch succeeded\nRolling used: \(rolling)\nMonthly used: \(monthly)"
