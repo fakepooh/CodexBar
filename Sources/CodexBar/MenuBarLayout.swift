@@ -604,6 +604,17 @@ enum MenuBarLayoutSemanticWindowResolver {
 }
 
 enum MenuBarLayoutBalanceResolver {
+    static func legacyBalance(
+        provider: UsageProvider,
+        snapshot: UsageSnapshot?,
+        showOptionalUsage: Bool = true) -> String?
+    {
+        guard ProviderDescriptorRegistry.descriptor(for: provider).presentation.legacyMenuBarShowsBalance else {
+            return nil
+        }
+        return self.balance(provider: provider, snapshot: snapshot, showOptionalUsage: showOptionalUsage)
+    }
+
     static func balance(
         provider: UsageProvider,
         snapshot: UsageSnapshot?,

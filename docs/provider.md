@@ -109,6 +109,8 @@ UI and settings should become descriptor-driven:
 For detail-backed balances, set `presentation.menuBarBalanceDetailLabels` to the provider's ordered row labels.
 The shared menu bar resolver uses the first reported row for Balance elements and, when no quota window exists,
 automatic text. Keep real percentage windows intact; do not fabricate a quota for a credits-only account.
+Set `presentation.legacyMenuBarShowsBalance` to `false` when legacy percentage, pace and reset-time modes
+must retain their allowance metric. Explicit Balance elements still use the reported balance.
 
 ## Fetch strategies
 

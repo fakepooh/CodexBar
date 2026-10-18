@@ -12,6 +12,9 @@ The Notion AI provider tracks the **Rolling** (6-hour) and **Monthly** (billing 
 windows that Notion shows in **Settings → Notion AI → Usage**, plus the separate **Notion Credits**
 balance used by Custom Agents and Workers for the same selected workspace.
 
+Notion Credits appear in explicit **Balance** elements. Legacy menu-bar percentage, pace and reset-time
+modes continue to display the selected Rolling or Monthly allowance, even when credits are available.
+
 Notion begins enforcing the AI usage allowance on **August 3, 2026**. Before that date the same endpoint
 reports `"enforcement": "preview"` while still returning real usage numbers, so the gauges are accurate
 either way.

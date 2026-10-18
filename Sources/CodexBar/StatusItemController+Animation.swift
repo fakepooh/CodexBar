@@ -878,7 +878,7 @@ extension StatusItemController {
         case .mistral: self.menuBarMetricWindow(for: provider, snapshot: snapshot, now: now) == nil
         default: true
         }
-        if usesBalance, let balance = MenuBarLayoutBalanceResolver.balance(
+        if usesBalance, let balance = MenuBarLayoutBalanceResolver.legacyBalance(
             provider: provider,
             snapshot: snapshot,
             showOptionalUsage: self.settings.showOptionalCreditsAndExtraUsage)

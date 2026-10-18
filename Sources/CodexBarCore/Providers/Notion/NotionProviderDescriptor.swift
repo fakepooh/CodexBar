@@ -91,6 +91,7 @@ public enum NotionProviderDescriptor {
                 },
                 menuBarLayoutSecondaryLabel: "Monthly",
                 menuBarBalanceDetailLabels: ["Remaining credits"],
+                legacyMenuBarShowsBalance: false,
                 optionalDetails: ProviderOptionalDetailsPresentation(
                     hiddenTitlesWithoutOptionalUsage: ["Notion Credits"])),
             fetchPlan: ProviderFetchPlan(

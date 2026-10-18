@@ -23,6 +23,10 @@ struct MenuBarLayoutProviderBalanceTests {
                 providerID: .notion, accountEmail: nil, accountOrganization: nil, loginMethod: "Business"))
         let data = self.data(provider: .notion, snapshot: snapshot)
         #expect(data.balance == balance)
+        // The legacy entry point must fall through to the selected allowance display mode.
+        #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .notion, snapshot: snapshot) == nil)
+        #expect(MenuBarLayoutBalanceResolver.legacyBalance(
+            provider: .notion, snapshot: snapshot, showOptionalUsage: false) == nil)
         #expect(data.automaticText == nil)
         #expect(self.render(layout: MenuBarLayout(lines: [[.balance]]), data: data)
             .attributedTitle.string == (balance ?? "–"))
@@ -50,6 +54,10 @@ struct MenuBarLayoutProviderBalanceTests {
             identity: ProviderIdentitySnapshot(
                 providerID: .codex, accountEmail: nil, accountOrganization: nil, loginMethod: nil))
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .notion, snapshot: foreign) == nil)
+
+        let balanceOnly = UsageSnapshot(primary: nil, secondary: nil, details: sections, updatedAt: self.now)
+        #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .notion, snapshot: balanceOnly) == nil)
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .notion, snapshot: balanceOnly) == balance)
     }
 
     @Test(arguments: BundledPluginTestSupport.engines)
@@ -59,6 +67,7 @@ struct MenuBarLayoutProviderBalanceTests {
         #expect(snapshot.details.flatMap(\.rows).map(\.value) == ["$6.76", "$6.76"])
         let data = self.data(provider: .nous, snapshot: snapshot)
         #expect(data.balance == "$6.76")
+        #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .nous, snapshot: snapshot) == "$6.76")
         #expect(data.automaticText == "$6.76")
         let withoutOptionalUsage = self.data(provider: .nous, snapshot: snapshot, showOptionalUsage: false)
         #expect(withoutOptionalUsage.balance == data.balance)
