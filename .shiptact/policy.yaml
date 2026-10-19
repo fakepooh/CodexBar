@@ -1,0 +1,2 @@
+# ShipTact-managed project policy overrides.
+{"verification":{"authoritative_ci":[{"name":"lint-build-test","workflow":"CI"}]}}
