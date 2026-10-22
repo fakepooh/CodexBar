@@ -20,6 +20,11 @@ struct ProviderPluginContextOptions: Sendable {
         try await Task.sleep(until: start.advanced(by: budget), clock: .continuous)
     }
 
+    /// Internal clock seam for deterministic runtime deadline tests; production keeps wall-clock sleep.
+    var waitForRuntimeDeadline: @Sendable (TimeInterval) async throws -> Void = { seconds in
+        try await Task.sleep(for: .seconds(seconds))
+    }
+
     var storage: ProviderPluginStorage?
     var beforeHTTPAttempt: (@Sendable (URLRequest) async throws -> Void)?
     var cookieSource: ProviderCookieSource = .auto

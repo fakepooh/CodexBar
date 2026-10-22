@@ -1008,7 +1008,8 @@ struct MenuBarLayoutPreview: View {
             automaticText: StatusItemController.menuBarLayoutAutomaticText(
                 provider: provider,
                 snapshot: snapshot,
-                automatic: automaticRenderWindow),
+                automatic: automaticRenderWindow,
+                showOptionalUsage: self.settings.showOptionalCreditsAndExtraUsage),
             sessionPace: self.store.menuBarLayoutPaceText(
                 provider: provider,
                 window: session,
@@ -1029,7 +1030,8 @@ struct MenuBarLayoutPreview: View {
             balance: MenuBarLayoutBalanceResolver.balance(
                 provider: provider,
                 snapshot: snapshot,
-                codexCredits: codexCredits),
+                codexCredits: codexCredits,
+                showOptionalUsage: self.settings.showOptionalCreditsAndExtraUsage),
             costToday: costToday.map {
                 UsageFormatter.currencyString($0, currencyCode: cost?.currencyCode ?? "USD")
             },

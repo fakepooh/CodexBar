@@ -169,7 +169,8 @@ extension StatusItemController {
         let balanceText = MenuBarLayoutBalanceResolver.balance(
             provider: provider,
             snapshot: snapshot,
-            codexCredits: codexCredits)
+            codexCredits: codexCredits,
+            showOptionalUsage: self.settings.showOptionalCreditsAndExtraUsage)
         return [
             "text=\(balanceText ?? "nil")",
             "remaining=\(Self.exactSignatureValue(amounts.remaining))",

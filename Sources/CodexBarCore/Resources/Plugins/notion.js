@@ -31,6 +31,7 @@ defineProvider({
   name: "Notion AI",
   settings: [
     { key: "WORKSPACE_ID", title: "Workspace ID", type: "plain" },
+    { key: "OPTIONAL_USAGE", title: "Optional usage", type: "plain" },
     { key: "HEADERS", title: "Captured headers", type: "secure" },
   ],
   endpoints: ["https://app.notion.com"],
@@ -246,21 +247,56 @@ defineProvider({
           return invalid("getCreditRateLimitStatus returned no usage windows");
         const primary = window(usage.window, true, usage.resetsInSeconds);
         const secondary = window(usage.billingPeriodWindow, false, undefined);
+        // Premium credits are a separate workspace balance, not an allowance window.
+        // Keep this request independent of session validation and required allowance parsing.
+        const details = [];
+        if (ctx.settings.get("OPTIONAL_USAGE") !== "false") {
+          try {
+            const response = await ctx.http.post(`https://${domain}/api/v3/getAIUsageEligibilityV2`, {
+              body: { spaceId: workspace.id },
+              headers,
+              cookieSession: session.id,
+              timeoutSeconds: 3,
+            });
+            if (response.status === 200) {
+              const premium = object(
+                _optionalChain([
+                  object,
+                  "call",
+                  (_22) => _22(JSON.parse(response.bodyText)),
+                  "optionalAccess",
+                  (_23) => _23.premiumCredits,
+                ]),
+              );
+              const balance = _optionalChain([premium, "optionalAccess", (_24) => _24.totalCreditBalance]);
+              if (typeof balance === "number" && Number.isFinite(balance)) {
+                details.push({
+                  title: "Notion Credits",
+                  rows: [{ label: "Remaining credits", value: ctx.format.number(balance) }],
+                });
+              }
+            }
+          } catch (error) {
+            if (error.transportClass === "cancelled") throw error;
+            // Missing, unsupported or malformed premium-credit data must not hide the allowances.
+          }
+        }
         const tier = _optionalChain([
           text,
           "call",
-          (_22) => _22(workspace.subscription_tier),
+          (_25) => _25(workspace.subscription_tier),
           "optionalAccess",
-          (_23) => _23.trim,
+          (_26) => _26.trim,
           "call",
-          (_24) => _24(),
+          (_27) => _27(),
         ]);
         const result = {
           primary,
           secondary,
+          details,
           empty: !primary && !secondary,
           identity: {
-            email: text(_optionalChain([user, "optionalAccess", (_25) => _25.email])),
+            email: text(_optionalChain([user, "optionalAccess", (_28) => _28.email])),
             accountID: userID,
             organization: text(workspace.name),
             loginMethod: tier ? tier[0].toUpperCase() + tier.slice(1) : undefined,

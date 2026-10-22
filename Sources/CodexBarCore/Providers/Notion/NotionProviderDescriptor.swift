@@ -89,7 +89,11 @@ public enum NotionProviderDescriptor {
                     }
                     return ProviderSemanticWindows(session: rolling, weekly: monthly)
                 },
-                menuBarLayoutSecondaryLabel: "Monthly"),
+                menuBarLayoutSecondaryLabel: "Monthly",
+                menuBarBalanceDetailLabels: ["Remaining credits"],
+                legacyMenuBarShowsBalance: false,
+                optionalDetails: ProviderOptionalDetailsPresentation(
+                    hiddenTitlesWithoutOptionalUsage: ["Notion Credits"])),
             fetchPlan: ProviderFetchPlan(
                 sourceModes: [.auto, .web],
                 pipeline: ProviderFetchPipeline(resolveStrategies: { context in
@@ -121,7 +125,9 @@ extension NotionProviderDescriptor {
             sourceLabel: "web",
             kind: .web,
             transport: transport,
-            timeout: max(30, timeout * 2),
+            // Preserve the required-request budget, then reserve the three-second premium lookup
+            // plus two seconds for scheduling and snapshot delivery. Other providers keep their budgets.
+            timeout: max(30, timeout * 2) + 5,
             resolveValues: { context in
                 let settings = context.settings?.notion
                 guard settings?.cookieSource != .off else { return nil }
@@ -143,7 +149,10 @@ extension NotionProviderDescriptor {
                     from: fields, allowlist: Dictionary(uniqueKeysWithValues: names.map { ($0, $0) }))
                 let encoded = (try? JSONSerialization.data(withJSONObject: headers)) ?? Data("{}".utf8)
                 return .init(
-                    settings: ["WORKSPACE_ID": settings?.workspaceID ?? ""],
+                    settings: [
+                        "WORKSPACE_ID": settings?.workspaceID ?? "",
+                        "OPTIONAL_USAGE": String(context.includeOptionalUsage),
+                    ],
                     secrets: ["HEADERS": String(data: encoded, encoding: .utf8) ?? "{}"])
             }, isEnabled: { _ in true })
     }

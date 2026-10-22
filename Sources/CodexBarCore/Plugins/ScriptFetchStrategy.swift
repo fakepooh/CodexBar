@@ -158,6 +158,15 @@ public final class ScriptFetchStrategy: ProviderFetchStrategy, @unchecked Sendab
     }
 
     private func loadedRuntime() throws -> ProviderPluginRuntime {
+        try self.loadedRuntime(contextOptions: .production, engine: .automatic)
+    }
+
+    /// Internal preparation seam: tests exercise the real strategy with a controlled clock and engine.
+    /// Ordinary fetches always prepare the production context and automatically selected engine.
+    func loadedRuntime(
+        contextOptions: ProviderPluginContextOptions,
+        engine: ProviderPluginEngineKind) throws -> ProviderPluginRuntime
+    {
         self.lock.lock()
         defer { self.lock.unlock() }
         if let runtime = self.runtime {
@@ -166,7 +175,9 @@ public final class ScriptFetchStrategy: ProviderFetchStrategy, @unchecked Sendab
         let runtime = try ProviderPluginRuntime(
             bundledPlugin: self.bundledPlugin,
             transport: self.transport,
-            timeout: self.timeout)
+            timeout: self.timeout,
+            contextOptions: contextOptions,
+            engine: engine)
         self.runtime = runtime
         return runtime
     }

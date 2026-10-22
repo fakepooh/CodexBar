@@ -221,7 +221,8 @@ extension StatusItemController {
             automaticText: Self.menuBarLayoutAutomaticText(
                 provider: provider,
                 snapshot: snapshot,
-                automatic: automatic),
+                automatic: automatic,
+                showOptionalUsage: self.settings.showOptionalCreditsAndExtraUsage),
             sessionPace: self.store.menuBarLayoutPaceText(
                 provider: provider,
                 window: windows.session,
@@ -242,7 +243,8 @@ extension StatusItemController {
             balance: MenuBarLayoutBalanceResolver.balance(
                 provider: provider,
                 snapshot: snapshot,
-                codexCredits: codexCredits),
+                codexCredits: codexCredits,
+                showOptionalUsage: self.settings.showOptionalCreditsAndExtraUsage),
             costToday: costs.today,
             cost30d: costs.last30Days,
             metrics: MenuBarLayoutRenderMetrics(
