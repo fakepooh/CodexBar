@@ -1,0 +1,21 @@
+{
+  "methodology": "prompt-review-v2.0.0",
+  "track": "copilot_cli_prompt_review_v2",
+  "delivery_channel": "single initial user prompt",
+  "page_order": "round robin by selected file order then page ordinal",
+  "excess_context": "omit complete source pages deterministically with receipts; oversized complete diff or empty page set blocks",
+  "requested_selection": "auto via --model=auto",
+  "cli_version": "1.0.98",
+  "builtin_agent": false,
+  "automatic_retries": false,
+  "cp02_v2_role": "methodology diagnostic only",
+  "limits": {
+    "page_bytes": 2000,
+    "max_pages": 40,
+    "max_prompt_bytes": 114688,
+    "max_diff_bytes": 65536
+  },
+  "model_tools": [],
+  "os_isolation": "existing private VM, read-only root and historical snapshot, no extra mounts",
+  "discovery": "existing bounded two-hop references plus declared interface/configuration/dependency definitions"
+}
