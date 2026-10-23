@@ -1,0 +1,23 @@
+{
+  "methodology": "prompt-review-v2.1.0",
+  "track": "copilot_cli_prompt_review_v2_1",
+  "delivery_channel": "single initial user prompt",
+  "page_order": "round robin by selected file order then page ordinal",
+  "excess_context": "omit complete source pages deterministically with receipts; oversized complete diff or empty page set blocks",
+  "requested_selection": "auto via --model=auto",
+  "cli_version": "1.0.98",
+  "builtin_agent": false,
+  "automatic_retries": false,
+  "cp02_v2_role": "methodology diagnostic only",
+  "limits": {
+    "page_bytes": 2000,
+    "max_pages": 40,
+    "max_prompt_bytes": 262144,
+    "max_diff_bytes": 196608
+  },
+  "model_tools": [],
+  "os_isolation": "existing private VM, read-only root and historical snapshot, no extra mounts",
+  "discovery": "Same deterministic bounded two-hop rules, with Markdown, shell and structured configuration included as inert historical text candidates.",
+  "change": "Generic capacity extension and non-code historical text seed coverage; no result-informed tuning. Distinct from v2.0.0 and no retrospective relabeling.",
+  "transport": "Supported non-interactive piped stdin; one unchanged initial prompt; avoids Linux MAX_ARG_STRLEN without prompt files, shell or extra turns."
+}

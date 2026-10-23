@@ -1,0 +1,14 @@
+{
+  "methodology": "prompt-review-v2.1.0",
+  "freeze_sha256": "42e954d9ffd0d5b9ddc67519d72663ff760f8eacf63acc900f3567397a5de0d6",
+  "manifest_sha256": "f76bf3451dbca6858498b6a994028cce49edcf07bd14b292c13032d88c15ad76",
+  "limits": {
+    "page_bytes": 2000,
+    "max_pages": 40,
+    "max_prompt_bytes": 262144,
+    "max_diff_bytes": 196608
+  },
+  "cli_version": "1.0.98",
+  "requested_selection": "auto",
+  "ai_authorized": false
+}

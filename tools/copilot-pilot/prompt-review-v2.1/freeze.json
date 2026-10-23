@@ -1,0 +1,35 @@
+{
+  "methodology": "prompt-review-v2.1.0",
+  "cli_version": "1.0.98",
+  "track": "copilot_cli_prompt_review_v2_1",
+  "image": "sha256:a6db151bc33e9e91f688c07b7ce2da52f2b9fa4a9f24e87b0f105ea84c5a5333",
+  "requested_selection": "auto",
+  "limits": {
+    "page_bytes": 2000,
+    "max_pages": 40,
+    "max_prompt_bytes": 262144,
+    "max_diff_bytes": 196608
+  },
+  "discovery": {
+    "hops": 2,
+    "max_files": 32,
+    "max_bytes": 131072,
+    "max_symbol_document_frequency": 48,
+    "page_bytes": 8000,
+    "max_source_bytes": 1048576
+  },
+  "artifacts_sha256": {
+    "prompt_review_v21_sources.py": "eb691cb3f077162df841fd960038a339a0fda6b77d920570f3f3056475aa9bad",
+    "prompt_review_v21_adapter.py": "069f73da53508731933239d77c5d81549e7dac605b343e94babda03d5b7b6626",
+    "v21_transport.cjs": "f5a58e313b571239ec36a094bf2f6cca82fe4f0d92d9e013761294e7d91b445c",
+    "v2_offline_transport_probe.py": "c6ed848ee5f492f30bf7db270901082f18d89d71a5be65f42f791fd81ddeb7ca",
+    "prompt-review-v2.1/adapter-prompt.txt": "a693a1fa94ffda0030e09a7366834b3705c85c8a69042d421e28cae9db474069",
+    "prompt-review-v2.1/output.schema.json": "ea7b7b46c001860adbe4ae6157686c75fcb8ed1988846c3051258dd40296e95d",
+    "prompt-review-v2.1/methodology.json": "fd073fa122f55648c51997c19c749fabb014808e9c1efc39202271d3f048821f",
+    "pilot.py": "358a84e4a7b9028de4f26ac201b71abd5d7a432b814a64de9d1251643f8070e4",
+    "prompt_review.py": "42f8660859b8d112f1b661e16b2d78fb9323d3cd9f0e22eb4c17ee844c2e7698",
+    "offline_preflight.py": "0cba6e5338d6b437e1155be1b4ac13cf4a6338c10c43ebaaae29cddb86b952f8",
+    "live_cp01.py": "a953a6549c8249e7e484515d2cee17fd2a37ba977fd4370b57fd6e0b4e1ad63e",
+    "runtime_setup.py": "69f4ae95105936cadc60e52e4fe64c995479bdebf0da7286fc1a42795c6e03c0"
+  }
+}
