@@ -1,0 +1,27 @@
+{
+  "methodology": "prompt-review-v2.2.1",
+  "cli_version": "1.0.98",
+  "requested_selection": "auto",
+  "policy": {
+    "max_depth": 3,
+    "max_units": 512,
+    "max_edges": 4096,
+    "max_candidates_per_symbol": 24,
+    "max_block_lines": 160,
+    "max_index_bytes": 67108864,
+    "max_file_bytes": 8388608,
+    "max_prompt_bytes": 262144,
+    "max_diff_bytes": 196608,
+    "page_bytes": 4000,
+    "max_pages": 256
+  },
+  "reused_v22_freeze": "6adb20a36751619001879b11523e6a230feeca3b3d141959fe12eccacab33655",
+  "reused_v21_freeze": "42e954d9ffd0d5b9ddc67519d72663ff760f8eacf63acc900f3567397a5de0d6",
+  "artifacts": {
+    "__init__.py": "73f27b680519570b54726aba829877678c24e5da5cad94557b51526aa5e1fa98",
+    "adapter.py": "319ecccd7b73f5df2c02e5bc860c52b2786e9af1a5077c8c623cfaf30be2a7ff",
+    "audit.py": "202b5cfc0830429442bddcc04fc619f0d72d16cc704125ea644e899ba49f3b53",
+    "methodology.json": "d59e2ec45887780a8797710477bf46c103240cf49d44e6d1c2bddee9170709d4",
+    "CHANGES.md": "e30bf11049f5373802e34620c1d48cb942dc91e0fb98bb1876350f35c98f09b7"
+  }
+}
