@@ -18,17 +18,22 @@ jobs:
         run: |
           PYTHONPATH=tools/copilot-pilot python3 -m unittest discover -s tools/copilot-pilot/tests -v
           PYTHONPATH=tools/copilot-pilot python3 -m unittest discover -s tools/copilot-pilot/review_v22/tests -v
+          PYTHONPATH=tools/copilot-pilot python3 -m unittest discover -s tools/copilot-pilot/review_v221/tests -v
       - name: Fetch inert historical objects without checkout
         run: python3 tools/copilot-pilot/public_actions_repos.py --output "$RUNNER_TEMP/v22-objects"
       - name: Reconstruct and independently verify all ten packets twice
         env:
           PYTHONPATH: tools/copilot-pilot
-        run: python3 -m review_v22.series --repos "$RUNNER_TEMP/v22-objects/repos.json" --contexts-root "$RUNNER_TEMP/v22-contexts" --output "$RUNNER_TEMP/v22-results"
+        run: |
+          python3 -m review_v22.series --repos "$RUNNER_TEMP/v22-objects/repos.json" --contexts-root "$RUNNER_TEMP/v22-contexts" --output "$RUNNER_TEMP/v220-results"
+          python3 -m review_v221.series --repos "$RUNNER_TEMP/v22-objects/repos.json" --contexts-root "$RUNNER_TEMP/v22-contexts" --output "$RUNNER_TEMP/v221-results"
       - name: Publish allowlisted hashes and counts only
         env:
           PYTHONPATH: tools/copilot-pilot
-          REPORT: ${{ runner.temp }}/v22-results/dry-run.json
-        run: python3 -m review_v22.report
+          REPORT: ${{ runner.temp }}/v221-results/dry-run.json
+        run: |
+          REPORT="$RUNNER_TEMP/v220-results/dry-run.json" python3 -m review_v22.report
+          python3 -m review_v221.report
   future-live-disabled:
     if: ${{ false }}
     needs: offline

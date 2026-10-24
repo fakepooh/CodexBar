@@ -1,0 +1,20 @@
+{
+  "methodology": "prompt-review-v2.2.1",
+  "correction_of": "prompt-review-v2.2.0",
+  "context_contract": "context-completeness-v1.0.0",
+  "evaluation_contract": "ground-truth-admissibility-v1.0.0",
+  "selector": "unchanged frozen v2.2.0 structural/lexical discovery",
+  "admission": "mandatory whole-line closure of v2.1 source pages; then novel ranges only, deduplicated against complete diff and already delivered source lines",
+  "monotonicity": "if required retained evidence cannot fit unchanged hard limits, block instead of dropping context",
+  "review_prompt_and_output_schema": "unchanged v2.1.0 bytes",
+  "model_selection": "explicit --model=auto; actual routing observed separately",
+  "cli_version": "1.0.98",
+  "prompt_limit_bytes": 262144,
+  "diff_limit_bytes": 196608,
+  "builtin_agent": false,
+  "delegation": false,
+  "model_tools": [],
+  "new_ai_authorized": false,
+  "automatic_retries": false,
+  "known_cases_role": "engineering diagnostic only; no recall improvement claim"
+}
