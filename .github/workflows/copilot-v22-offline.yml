@@ -1,0 +1,39 @@
+name: Copilot historical context v2.2 (offline only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: copilot-v22-offline
+  cancel-in-progress: false
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test preserved contracts and new generic rules without AI
+        run: |
+          PYTHONPATH=tools/copilot-pilot python3 -m unittest discover -s tools/copilot-pilot/tests -v
+          PYTHONPATH=tools/copilot-pilot python3 -m unittest discover -s tools/copilot-pilot/review_v22/tests -v
+      - name: Fetch inert historical objects without checkout
+        run: python3 tools/copilot-pilot/public_actions_repos.py --output "$RUNNER_TEMP/v22-objects"
+      - name: Reconstruct and independently verify all ten packets twice
+        env:
+          PYTHONPATH: tools/copilot-pilot
+        run: python3 -m review_v22.series --repos "$RUNNER_TEMP/v22-objects/repos.json" --contexts-root "$RUNNER_TEMP/v22-contexts" --output "$RUNNER_TEMP/v22-results"
+      - name: Publish allowlisted hashes and counts only
+        env:
+          PYTHONPATH: tools/copilot-pilot
+          REPORT: ${{ runner.temp }}/v22-results/dry-run.json
+        run: python3 -m review_v22.report
+  future-live-disabled:
+    if: ${{ false }}
+    needs: offline
+    environment: copilot-pilot-explicit-approval
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - run: echo 'New explicit authorization and validated private controller required.'

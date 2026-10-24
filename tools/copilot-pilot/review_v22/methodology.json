@@ -1,0 +1,27 @@
+{
+  "methodology": "prompt-review-v2.2.0",
+  "context_contract": "context-completeness-v1.0.0",
+  "evaluation_contract": "ground-truth-admissibility-v1.0.0",
+  "track": "copilot_cli_prompt_review_v2_2",
+  "cli_version": "1.0.98",
+  "requested_selection": "auto via --model=auto",
+  "actual_model": "observed only from live routing and usage; never pinned",
+  "reviewer_task_and_findings_schema": "byte-identical copies of v2.1.0",
+  "delivery_channel": "single initial stdin user prompt",
+  "builtin_agent": false,
+  "delegation": false,
+  "model_tools": [],
+  "context_change": "bounded containing ranges and explicit candidate dependency closure replace whole-file admission and round-robin file prefixes",
+  "budget_change": "same 262144-byte prompt and 196608-byte diff; 4000-byte pages; at most 256 pages instead of 40; no silent clipping",
+  "source_order": "head changed code ranges; base changed code; changed config; breadth-first head code dependencies; config candidates; documentation supplements; ties by depth/path/range/side",
+  "completeness": "scoped static candidate closure or partial, never semantic-completeness proof",
+  "blindness": "context generation never loads evaluator modules; known PUB findings only audited after packet hashes are fixed",
+  "development_cases": "all previous CP/PUB cases excluded from independent holdout",
+  "ai_execution_authorized": false,
+  "automatic_retry": false,
+  "limitations": [
+    "Lexical matching is not a compiler call graph",
+    "Dynamic cross-language dispatch needs independent audit",
+    "No live observation yet establishes quality improvement"
+  ]
+}
