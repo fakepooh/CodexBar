@@ -213,7 +213,8 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.macos-tests == 'true' }}
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    # Cold Intel build was still compiling tests at 30m; retain finite headroom.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
