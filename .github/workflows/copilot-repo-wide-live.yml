@@ -1,0 +1,53 @@
+name: Copilot repo-wide candidate (no AI)
+on:
+  workflow_dispatch:
+    inputs:
+      authentication_probe:
+        description: Sessionless pinned CLI auth only; no review session
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: copilot-repo-wide-readonly
+  cancel-in-progress: false
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Deterministic primitives (no credentials, no model)
+        env:
+          PYTHONPATH: tools/copilot-pilot
+        run: python3 -m unittest discover -s tools/copilot-pilot/repo_wide_readonly/tests -v
+      - name: Recipient-only encrypted evidence tests
+        run: node --test tools/copilot-pilot/repo_wide_readonly/tests/seal.test.mjs
+  sessionless-auth:
+    if: ${{ inputs.authentication_probe }}
+    needs: offline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      copilot-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install exact SDK and bundled CLI from integrity lock
+        working-directory: tools/copilot-pilot/repo_wide_readonly
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authentication only, never a review
+        working-directory: tools/copilot-pilot/repo_wide_readonly
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node auth-preflight.mjs
+  live-disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - run: echo 'Native isolation, private recovery, Billing, durable remote guards and frozen live executor are not proved.'
