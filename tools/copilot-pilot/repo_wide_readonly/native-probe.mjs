@@ -113,8 +113,11 @@ try {
 } catch (error) {
   report.reason = 'NATIVE_OFFLINE_PROOF_FAILED'; report.failed_stage = stage;
   const safe = ['NETWORK_NOT_NONE', 'CREDENTIAL_ENV', 'OS_ISOLATION', 'CLI_PIN',
-    'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE'];
-  report.failure_code = safe.includes(error?.message) ? error.message : 'SDK_OR_LOCAL_PROTOCOL_FAILURE';
+    'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE', 'BROKER_EXIT', 'BROKER_DEADLINE'];
+  const system = { EACCES: 'RUNTIME_EXECUTION_DENIED', EROFS: 'RUNTIME_READONLY_PREPARATION_REQUIRED',
+    ENOENT: 'RUNTIME_COMPONENT_MISSING' };
+  report.failure_code = safe.includes(error?.message) ? error.message
+    : (system[error?.code] || 'SDK_OR_LOCAL_PROTOCOL_FAILURE');
 }
 finally {
   if (session) try { await session.destroy(); } catch {}

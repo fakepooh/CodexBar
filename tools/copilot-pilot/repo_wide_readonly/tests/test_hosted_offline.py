@@ -6,11 +6,11 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-from repo_wide_readonly.hosted_offline import run
+from repo_wide_readonly.hosted_offline import run, failure_diagnostic
 
 
 class HostedOrchestration(unittest.TestCase):
-    def execute(self, *, timeout=False, proof=None, cleanup_fails=False):
+    def execute(self, *, timeout=False, proof=None, cleanup_fails=False, exit_code=0, stderr=b''):
         calls = []
         if proof is None:
             proof = {'status': 'PASS', 'native_cli_version': '1.0.98', 'real_model_requests': 0,
@@ -21,7 +21,7 @@ class HostedOrchestration(unittest.TestCase):
             calls.append((argv, options))
             if argv[:2] == ['docker', 'run']:
                 if timeout: raise subprocess.TimeoutExpired(argv, 150)
-                return subprocess.CompletedProcess(argv, 0, json.dumps(proof).encode(), b'')
+                return subprocess.CompletedProcess(argv, exit_code, json.dumps(proof).encode(), stderr)
             if argv[:2] == ['docker', 'ps']:
                 return subprocess.CompletedProcess(argv, 1 if cleanup_fails else 0, b'', b'')
             return subprocess.CompletedProcess(argv, 0, b'', b'')
@@ -57,6 +57,25 @@ class HostedOrchestration(unittest.TestCase):
         r, _ = self.execute(cleanup_fails=True)
         self.assertEqual(r['status'], 'BLOCKED')
         self.assertFalse(r['owned_container_absent_after_cleanup'])
+
+    def test_failed_child_keeps_only_bounded_safe_diagnostic_and_never_passes(self):
+        proof = {'status': 'BLOCKED', 'failed_stage': 'cli_initialization',
+                 'failure_code': 'RUNTIME_EXECUTION_DENIED', 'mock_requests': 0,
+                 'private_error': 'PRIVATE_FIXTURE_SENTINEL'}
+        r, calls = self.execute(proof=proof, exit_code=2, stderr=b'EACCES PRIVATE_FIXTURE_SENTINEL')
+        self.assertEqual(r['status'], 'BLOCKED')
+        self.assertEqual(r['native_process_exit_code'], 2)
+        self.assertEqual(r['native_failure']['failure_code'], 'RUNTIME_EXECUTION_DENIED')
+        self.assertNotIn('PRIVATE_FIXTURE_SENTINEL', json.dumps(r))
+        self.assertTrue(r['owned_container_absent_after_cleanup'])
+        self.assertEqual(sum(a[:2] == ['docker', 'run'] for a, _ in calls), 1)
+
+    def test_arbitrary_failure_fields_or_non_json_are_not_published(self):
+        for raw in [b'PRIVATE_FIXTURE_SENTINEL', json.dumps({'failed_stage': 'PRIVATE_FIXTURE_SENTINEL',
+                    'failure_code': 'PRIVATE_FIXTURE_SENTINEL', 'mock_requests': True}).encode()]:
+            proof = failure_diagnostic(raw)
+            self.assertNotIn('PRIVATE_FIXTURE_SENTINEL', json.dumps(proof))
+            self.assertNotIn('mock_requests', proof)
 
     def test_bad_or_untyped_receipts_rejected(self):
         for proof in [{'status': 'PASS'}, {'status': 'PASS', 'real_model_requests': False},

@@ -14,6 +14,34 @@ from .prepare import hosted, prepare
 from .snapshot import canonical, sha
 
 
+def failure_diagnostic(raw, stderr=b''):
+    """Only fixed labels/types leave the credential-free child; never raw errors."""
+    result = {'receipt': 'UNAVAILABLE'}
+    try:
+        proof = json.loads(raw) if len(raw) <= 1048576 else None
+        if isinstance(proof, dict):
+            result['receipt'] = 'PRESENT'
+            stages = {'os_boundary', 'local_receiver', 'cli_initialization',
+                      'local_session_configuration', 'local_callback_transport'}
+            codes = {'NETWORK_NOT_NONE', 'CREDENTIAL_ENV', 'OS_ISOLATION', 'CLI_PIN',
+                     'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE',
+                     'SDK_OR_LOCAL_PROTOCOL_FAILURE', 'RUNTIME_EXECUTION_DENIED',
+                     'RUNTIME_READONLY_PREPARATION_REQUIRED', 'RUNTIME_COMPONENT_MISSING',
+                     'BROKER_EXIT', 'BROKER_DEADLINE'}
+            for key, allowed in [('failed_stage', stages), ('failure_code', codes)]:
+                if proof.get(key) in allowed:
+                    result[key] = proof[key]
+            if type(proof.get('mock_requests')) is int and 0 <= proof['mock_requests'] <= 6:
+                result['mock_requests'] = proof['mock_requests']
+    except (ValueError, TypeError):
+        pass
+    result['stderr_class'] = next((name for marker, name in [
+        (b'ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND'), (b'EROFS', 'READONLY_FILESYSTEM'),
+        (b'EACCES', 'EXECUTION_DENIED'), (b'OCI runtime create failed', 'CONTAINER_START_FAILED')]
+        if marker in stderr), 'UNCLASSIFIED')
+    return result
+
+
 def run(output):
     hosted()
     output = Path(output); output.mkdir(parents=True, exist_ok=False)
@@ -30,6 +58,9 @@ def run(output):
                        'status': 'PASS' if result.returncode == 0 else 'FAILED'})
         if result.returncode:
             # Never print dependency, CLI or Docker raw errors into public logs.
+            if stage == 'native_cli_broker_transport':
+                report['native_process_exit_code'] = result.returncode
+                report['native_failure'] = failure_diagnostic(result.stdout, result.stderr)
             raise ValueError('OFFLINE_STAGE_FAILED')
         return result.stdout
     report = {'status': 'BLOCKED', 'real_model_requests': 0, 'live_reservations_created': 0}
