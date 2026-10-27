@@ -31,6 +31,7 @@ class SnapshotTools(unittest.TestCase):
         v = self.b.view('src/large.swift', 8001, 8001)
         self.assertEqual(v['lines'][0]['text'], 'caller configuration')
         self.assertEqual(v['lines'][0]['line'], 8001)
+        self.assertIsNone(v['next_cursor'])
 
     def test_full_inventory_pagination(self):
         first = self.b.glob('*', limit=2)
@@ -56,6 +57,22 @@ class SnapshotTools(unittest.TestCase):
     def test_binary_disclosed_without_execution(self):
         self.assertTrue(self.b.view('binary.bin')['source_not_text'])
 
+    def test_binary_bytes_are_available_exactly_with_explicit_pagination(self):
+        import base64
+        a = self.b.view('binary.bin', encoding='base64', byte_limit=1)
+        b = self.b.view('binary.bin', byte_limit=1, **a['next_cursor'])
+        self.assertEqual(base64.b64decode(a['content']) + base64.b64decode(b['content']), b'\xff\x00')
+        self.assertIsNone(b['next_cursor'])
+
+    def test_contradictory_byte_and_line_modes_fail_closed(self):
+        with self.assertRaises(ValueError):
+            self.b.view('long.txt', start_line=2, encoding='base64')
+
+    def test_search_large_cursor_does_not_return_prior_matches(self):
+        v = self.b.grep('unchanged', cursor=7999, limit=2)
+        self.assertEqual([r['line'] for r in v['matches']], [8000])
+        self.assertEqual(v['total_matches'], 8000)
+
     def test_symlink_blob_is_inert_text(self):
         self.assertEqual(self.b.view('link')['lines'][0]['text'], '/proc/self/environ')
 
@@ -70,6 +87,10 @@ class SnapshotTools(unittest.TestCase):
     def test_source_change_rejected(self):
         (self.root / 'config/defaults.json').write_text('future fix')
         with self.assertRaises(ValueError): self.b.view('config/defaults.json')
+
+    def test_contradictory_blob_identity_is_not_reported_as_verified(self):
+        self.receipt['files'][0]['blob_oid'] = '0' * 40
+        with self.assertRaises(ValueError): self.b.view('src/large.swift')
 
     def test_shell_write_delegation_not_tools(self):
         for tool in ['bash', 'edit', 'task', 'web_fetch', 'memory']:
@@ -143,6 +164,7 @@ class InertConstruction(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch('repo_wide_readonly.snapshot.git', side_effect=fake):
             receipt, diff = build('/unused', {'base': 'a' * 40, 'head': 'b' * 40}, Path(tmp) / 'tree')
             self.assertTrue(receipt['complete']); self.assertEqual(receipt['file_count'], 2)
+            self.assertEqual({r['path']: r['line_count'] for r in receipt['files']}, {'a.txt': 1, 'link': 1})
             self.assertEqual(diff, b'complete cumulative diff\n')
             self.assertFalse((Path(tmp) / 'tree/link').is_symlink())
             self.assertEqual((Path(tmp) / 'tree/link').read_bytes(), b'../outside')

@@ -44,7 +44,9 @@ def build(repo, case, destination, max_bytes=536870912):
         raise ValueError('Unexpected merge-base response')
     # Explicit flags avoid configuration-dependent external diff/textconv.
     diff = git(repo, 'diff', '--no-ext-diff', '--no-textconv', '--binary',
-               '--no-renames', '--full-index', case['base'], case['head'], '--')
+               '--no-renames', '--full-index', '--no-color', '--diff-algorithm=myers',
+               '--unified=3', '--inter-hunk-context=0', '--src-prefix=a/', '--dst-prefix=b/',
+               case['base'], case['head'], '--')
     entries = []
     for record in git(repo, 'ls-tree', '-rz', '--full-tree', case['head']).split(b'\0'):
         if not record:
@@ -73,6 +75,7 @@ def build(repo, case, destination, max_bytes=536870912):
             target.chmod(0o444)
             receipt.append({'path': name, 'git_mode': mode, 'blob_oid': oid,
                             'sha256': sha(content), 'bytes': len(content),
+                            'line_count': content.count(b'\n') + int(bool(content) and not content.endswith(b'\n')),
                             'symlink_materialized_as_inert_text': mode == '120000'})
         for directory in sorted((p for p in root.rglob('*') if p.is_dir()), reverse=True):
             directory.chmod(0o555)

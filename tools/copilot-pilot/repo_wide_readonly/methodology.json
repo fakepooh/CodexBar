@@ -14,11 +14,11 @@
   "general_budget_policy_changed": false,
   "execution_environment": "GitHub-hosted ubuntu-24.04 only",
   "model_tools": [
-    "view",
-    "grep",
-    "glob"
+    "repo_view",
+    "repo_grep",
+    "repo_glob"
   ],
-  "tools_implementation": "Official SDK builtin overrides backed by a separate credential-free OS-isolated broker; native full-path validation not yet proved on runner",
+  "tools_implementation": "Unique official SDK custom read/search tools backed by a separate credential-free OS-isolated broker; no native-tool fallback. Actual native callback and OS boundary await GitHub-hosted proof.",
   "no_custom_instructions": true,
   "repository_history_access": false,
   "complete_tracked_head_tree": true,
@@ -34,13 +34,14 @@
   "durable_reservation": "atomic create-only Git ref bound to experiment/case/run/attempt/workflow/methodology/prompt; separate contents-write job; live reader cannot write ledger",
   "live_enabled": false,
   "blocking_acceptance": [
-    "Canonical ShipTact/GitHub delivery credential without local Keychain",
     "Real GitHub-hosted authentication-only probe",
-    "Actual real CLI-to-mock SDK override and broker OS-boundary probe",
+    "Actual real CLI-to-mock SDK custom-tool callback and broker OS-boundary probe",
     "Remote reservation implementation and hosted race/rerun tests",
-    "Public-key recipient provisioning and encrypted artifact recovery validation",
-    "Dedicated private prompt Actions secret",
+    "Hosted recipient-encrypted artifact recovery validation",
     "Fresh owner Free/paid-off evidence and authoritative included allowance admissibility",
     "Full live executor, immutable methodology freeze and exact authorized run bindings"
-  ]
+  ],
+  "management_auth": "Standard existing gh credential; Keychain explicitly permitted by user clarification. Never a live Copilot credential relay.",
+  "private_prompt_secret_provisioned": true,
+  "public_recipient_secret_provisioned": true
 }

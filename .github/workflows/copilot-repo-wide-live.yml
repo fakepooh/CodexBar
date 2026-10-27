@@ -1,9 +1,11 @@
-name: Copilot repo-wide candidate (no AI)
-on:
+# Delivery template for .github/workflows/copilot-repo-wide-live.yml after the preparation PR.
+# NO live execution entry exists in this workflow.
+name: Copilot repo-wide hosted preflight (no AI)
+'on':
   workflow_dispatch:
     inputs:
       authentication_probe:
-        description: Sessionless pinned CLI auth only; no review session
+        description: Sessionless pinned CLI authentication only
         type: boolean
         default: false
 permissions:
@@ -14,17 +16,59 @@ concurrency:
 jobs:
   offline:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Deterministic primitives (no credentials, no model)
+      - name: Install exact SDK for constructor-only regression tests (never start CLI)
+        working-directory: tools/copilot-pilot/repo_wide_readonly
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Deterministic infrastructure tests
         env:
           PYTHONPATH: tools/copilot-pilot
-        run: python3 -m unittest discover -s tools/copilot-pilot/repo_wide_readonly/tests -v
-      - name: Recipient-only encrypted evidence tests
-        run: node --test tools/copilot-pilot/repo_wide_readonly/tests/seal.test.mjs
+        run: |
+          python3 -m unittest discover -s tools/copilot-pilot/repo_wide_readonly/tests -v
+          node --test tools/copilot-pilot/repo_wide_readonly/tests/*.test.mjs
+      - name: Native CLI to local mock and isolated broker (no network, no credentials)
+        env:
+          PYTHONPATH: tools/copilot-pilot
+        run: python3 -m repo_wide_readonly.hosted_offline --output "$RUNNER_TEMP/repo-wide-native"
+      - name: Reconstruct all ten complete historical trees and diffs (never execute)
+        env:
+          PYTHONPATH: tools/copilot-pilot
+        run: python3 -m repo_wide_readonly.prepare --output "$RUNNER_TEMP/repo-wide-historical"
+      - name: Prepare private recovery fixture
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, secrets
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'repo-wide-native'
+          content = json.dumps({'purpose': 'encrypted hosted artifact recovery fixture, not review',
+                                'nonce': secrets.token_hex(32)}, sort_keys=True).encode()
+          (root / 'recovery-fixture.json').write_bytes(content)
+          identity = {'purpose': 'offline-recovery-v1', 'run_id': os.environ['GITHUB_RUN_ID'],
+                      'commit': os.environ['GITHUB_SHA'], 'plaintext_sha256': hashlib.sha256(content).hexdigest()}
+          (root / 'recovery-identity.json').write_text(json.dumps(identity))
+          PY
+      - name: Encrypt before upload (public recipient only)
+        env:
+          COPILOT_REPO_WIDE_PUBLIC_RECIPIENT: ${{ secrets.COPILOT_REPO_WIDE_PUBLIC_RECIPIENT }}
+        run: >-
+          node tools/copilot-pilot/repo_wide_readonly/seal-file.mjs
+          "$RUNNER_TEMP/repo-wide-native/recovery-fixture.json"
+          "$RUNNER_TEMP/repo-wide-native/recovery-envelope.json"
+          "$RUNNER_TEMP/repo-wide-native/recovery-identity.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repo-wide-offline-recovery-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/repo-wide-native/recovery-envelope.json
+            ${{ runner.temp }}/repo-wide-native/recovery-identity.json
+            ${{ runner.temp }}/repo-wide-native/receipt.json
+            ${{ runner.temp }}/repo-wide-native/native-proof.json
+            ${{ runner.temp }}/repo-wide-historical/summary.json
   sessionless-auth:
     if: ${{ inputs.authentication_probe }}
     needs: offline
@@ -45,9 +89,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node auth-preflight.mjs
-  live-disabled:
-    if: ${{ false }}
+  ledger-fixture:
+    needs: offline
     runs-on: ubuntu-24.04
-    permissions: {}
+    timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
-      - run: echo 'Native isolation, private recovery, Billing, durable remote guards and frozen live executor are not proved.'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Atomic remote exclusion in offline fixture namespace (no PUB guard)
+        env:
+          PYTHONPATH: tools/copilot-pilot
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -m repo_wide_readonly.ledger_fixture

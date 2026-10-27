@@ -5,6 +5,8 @@ network, credentials, host mounts or privileged socket. This module alone is
 not that OS boundary. It never launches a shell or executes repository files.
 """
 import fnmatch
+import base64
+import hashlib
 from pathlib import Path
 
 from .snapshot import relative, sha
@@ -19,6 +21,7 @@ class Broker:
         for name in self.files:
             relative(name)
         self.calls = []
+        self.commit = receipt.get('case', {}).get('head')
 
     def content(self, name):
         relative(name)
@@ -31,7 +34,8 @@ class Broker:
             raise ValueError('Snapshot escape')
         value = path.read_bytes()
         row = self.files[name]
-        if len(value) != row['bytes'] or sha(value) != row['sha256']:
+        blob_oid = hashlib.sha1(b'blob ' + str(len(value)).encode() + b'\0' + value).hexdigest()
+        if len(value) != row['bytes'] or sha(value) != row['sha256'] or blob_oid != row['blob_oid']:
             raise ValueError('Snapshot changed')
         return value
 
@@ -41,18 +45,38 @@ class Broker:
             raise ValueError('Invalid bounded range')
         return value
 
-    def view(self, path, start_line=1, end_line=None, column=0):
+    def view(self, path, start_line=1, end_line=None, column=0,
+             encoding='text', byte_offset=0, byte_limit=8192):
+        raw = self.content(path)
+        identity = {'path': path, 'blob_oid': self.files[path]['blob_oid'],
+                    'git_mode': self.files[path].get('git_mode'),
+                    'source_sha256': sha(raw), 'commit': self.commit, 'side': 'head'}
+        if encoding == 'base64':
+            if start_line != 1 or end_line is not None or column != 0:
+                raise ValueError('Byte and line modes cannot be mixed')
+            self.number(byte_offset, 0, len(raw)); self.number(byte_limit, 1, 8192)
+            data = raw[byte_offset:byte_offset + byte_limit]; end = byte_offset + len(data)
+            value = dict(identity, encoding='base64', content=base64.b64encode(data).decode(),
+                         byte_start=byte_offset, byte_end=end, total_bytes=len(raw),
+                         next_cursor={'encoding': 'base64', 'byte_offset': end} if end < len(raw) else None)
+            self.calls.append({'tool': 'view', **identity, 'encoding': 'base64',
+                               'byte_start': byte_offset, 'byte_end': end})
+            return value
+        if encoding != 'text' or byte_offset != 0 or byte_limit != 8192:
+            raise ValueError('Explicit compatible text mode required')
         start_line = self.number(start_line, 1, 10000000)
         column = self.number(column, 0, 536870912)
         if end_line is None:
             end_line = start_line + 199
         end_line = self.number(end_line, start_line, start_line + 399)
-        raw = self.content(path)
         try:
-            lines = raw.decode('utf-8', errors='strict').split('\n')
+            text = raw.decode('utf-8', errors='strict')
+            lines = text.split('\n') if text else []
+            if text.endswith('\n'):
+                lines.pop()
         except UnicodeDecodeError:
-            return {'path': path, 'binary': True, 'bytes': len(raw), 'sha256': sha(raw),
-                    'source_not_text': True}
+            return dict(identity, binary=True, bytes=len(raw),
+                        source_not_text=True, byte_view_available=True)
         result = []; size = 0; next_cursor = None
         for n in range(start_line, min(end_line, len(lines)) + 1):
             text = lines[n - 1]
@@ -70,8 +94,7 @@ class Broker:
                 next_cursor = {'start_line': n, 'column': begin + len(chunk)}; break
         if next_cursor is None and end_line < len(lines):
             next_cursor = {'start_line': end_line + 1, 'column': 0}
-        value = {'path': path, 'blob_oid': self.files[path]['blob_oid'],
-                 'source_sha256': sha(raw), 'lines': result, 'next_cursor': next_cursor,
+        value = {**identity, 'lines': result, 'next_cursor': next_cursor,
                  'partial': next_cursor is not None}
         self.calls.append({'tool': 'view', 'path': path, 'start_line': start_line,
                            'end_line': result[-1]['line'] if result else None,
@@ -94,7 +117,7 @@ class Broker:
         self.number(cursor, 0, 10000000); self.number(limit, 1, 200)
         if not isinstance(pattern, str) or len(pattern) > 500:
             raise ValueError('Invalid pattern')
-        matches = []; binary = []; inspected = []; more = False
+        matches = []; binary = []; inspected = []; more = False; match_count = 0
         for path in sorted(self.files):
             if not fnmatch.fnmatchcase(path, pattern):
                 continue
@@ -108,18 +131,20 @@ class Broker:
                 if at >= 0:
                     # Explicit bounded match window, never an entire unbounded line.
                     start = max(0, at - 80); end = min(len(text), at + len(query) + 80)
-                    matches.append({'path': path, 'line': number, 'column': at,
-                                    'text': text[start:end], 'window_start_column': start,
-                                    'line_complete': start == 0 and end == len(text),
-                                    'source_sha256': sha(raw)})
-                    if len(matches) > cursor + limit:
+                    if match_count >= cursor + limit:
                         more = True; break
+                    if match_count >= cursor:
+                        matches.append({'path': path, 'line': number, 'column': at,
+                                        'text': text[start:end], 'window_start_column': start,
+                                        'line_complete': start == 0 and end == len(text),
+                                        'source_sha256': sha(raw)})
+                    match_count += 1
             if more:
                 break
-        batch = matches[cursor:cursor + limit]
+        batch = matches
         self.calls.append({'tool': 'grep', 'query': query, 'inspected_paths': inspected,
                            'matches': [{k: row[k] for k in ('path', 'line', 'source_sha256')} for row in batch]})
-        return {'matches': batch, 'total_matches': None if more else len(matches),
+        return {'matches': batch, 'total_matches': None if more else match_count,
                 'search_complete': not more, 'binary_paths_not_text_searched': binary,
                 'next_cursor': cursor + len(batch) if more else None}
 
