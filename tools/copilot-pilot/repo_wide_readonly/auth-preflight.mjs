@@ -22,8 +22,9 @@ try {
   stage = 'client_constructor';
   client = new CopilotClient({ ...emptyClientOptions(home),
     gitHubToken: process.env.GITHUB_TOKEN, logLevel: 'error',
-    connection: RuntimeConnection.forStdio({ args: ['--no-custom-instructions', '--no-auto-update',
-      '--disable-builtin-mcps', '--no-auto-login', '--secret-env-vars=GITHUB_TOKEN,COPILOT_SDK_AUTH_TOKEN'],
+    // The official SDK generates its headless/auth-token-env/no-auto-login flags.
+    // No sessions or model tools are created by this authentication-only script.
+    connection: RuntimeConnection.forStdio({ args: [],
       env: { PATH: process.env.PATH, HOME: home, COPILOT_HOME: join(home, '.copilot'),
         GITHUB_TOKEN: process.env.GITHUB_TOKEN, GITHUB_ACTIONS: 'true',
         GITHUB_REPOSITORY: 'fakepooh/CodexBar' } }) });

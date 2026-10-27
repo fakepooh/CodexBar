@@ -6,7 +6,7 @@ import { networkInterfaces } from 'node:os';
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { BrokerRpc, NAMES, toolset, permission, hooks } from './sdk-tools.mjs';
-import { emptyClientOptions } from './client-options.mjs';
+import { emptyClientOptions, initializationOnly } from './client-options.mjs';
 
 let client, session, rpc, server, broker;
 let stage = 'os_boundary';
@@ -81,11 +81,34 @@ try {
     COPILOT_PROVIDER_WIRE_MODEL: 'offline-tool-stub',
     COPILOT_PROVIDER_MAX_PROMPT_TOKENS: '131072', COPILOT_PROVIDER_MAX_OUTPUT_TOKENS: '4096' };
   stage = 'cli_initialization';
+  // Compare bootstrap syntax only; these clients never create review sessions.
+  const bootstrap = [ ['sdk_only', []],
+    ['tool_flags', ['--available-tools=' + NAMES.join(','), '--deny-tool=shell', '--deny-tool=write',
+      '--deny-tool=read', '--deny-tool=memory', '--deny-tool=url']],
+    ['instruction_flags', ['--no-custom-instructions', '--disable-builtin-mcps']],
+    ['remote_flags', ['--no-remote', '--no-remote-export']],
+    ['duplicate_sdk_flags', ['--no-auto-update', '--no-auto-login']] ];
+  report.bootstrap_matrix = [];
+  const privateBootstrap = [];
+  for (const [label, args] of bootstrap) {
+    const home = '/tmp/home/bootstrap-' + label; await mkdir(home, { recursive: true });
+    const probe = new CopilotClient({ ...emptyClientOptions(home), logLevel: 'error',
+      connection: RuntimeConnection.forStdio({ env: { ...env, HOME: home, COPILOT_HOME: home + '/.copilot' }, args }) });
+    const result = await initializationOnly(probe);
+    report.bootstrap_matrix.push({ label, status: result.status,
+      version_matches: result.version_matches, cleanup_confirmed: result.cleanup_confirmed });
+    if (result.private_error) privateBootstrap.push({ label, error: result.private_error });
+    report.private_bootstrap_diagnostic = JSON.stringify(privateBootstrap).split(receiverNonce).join('[LOCAL_NONCE_REDACTED]').slice(0, 32768);
+    if (!result.cleanup_confirmed) throw Error('BOOTSTRAP_CLEANUP_UNPROVED');
+    if (label === 'sdk_only' && result.status !== 'PASS') throw Error('SDK_BASELINE_STARTUP_FAILED');
+  }
+  // SDK empty mode and session-level tool filters/hooks enforce the same closed
+  // catalog. Verify that catalog at the receiver before accepting any proof.
+  const supportedArgs = bootstrap.filter(([label]) => label !== 'duplicate_sdk_flags'
+    && report.bootstrap_matrix.find(row => row.label === label)?.status === 'PASS').flatMap(([, args]) => args);
+  report.verified_extra_bootstrap_args = supportedArgs;
   client = new CopilotClient({ ...emptyClientOptions('/tmp/home'), logLevel: 'error',
-    connection: RuntimeConnection.forStdio({ env,
-      args: ['--available-tools=' + NAMES.join(','), '--deny-tool=shell', '--deny-tool=write',
-        '--deny-tool=read', '--deny-tool=memory', '--deny-tool=url', '--no-custom-instructions',
-        '--no-auto-update', '--disable-builtin-mcps', '--no-auto-login', '--no-remote', '--no-remote-export'] }) });
+    connection: RuntimeConnection.forStdio({ env, args: supportedArgs }) });
   await client.start(); report.native_cli_version = (await client.getStatus()).version;
   if (report.native_cli_version !== '1.0.98') throw Error('CLI_PIN');
   stage = 'local_session_configuration';
@@ -116,12 +139,13 @@ try {
   // credentials or historical source. Parent captures stdout privately and
   // encrypts this diagnostic; it must never print this field to public logs.
   if (stage === 'cli_initialization' && report.mock_requests === 0) {
-    report.private_startup_diagnostic = JSON.stringify({
+    report.private_startup_diagnostic = JSON.stringify({ bootstrap: report.private_bootstrap_diagnostic,
       error: String(error?.stack || error?.message || ''),
       stderr: String(client?.stderrBuffer || '') }).split(receiverNonce).join('[LOCAL_NONCE_REDACTED]').slice(0, 32768);
   }
   const safe = ['NETWORK_NOT_NONE', 'CREDENTIAL_ENV', 'OS_ISOLATION', 'CLI_PIN',
-    'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE', 'BROKER_EXIT', 'BROKER_DEADLINE'];
+    'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE', 'BROKER_EXIT', 'BROKER_DEADLINE',
+    'SDK_BASELINE_STARTUP_FAILED', 'BOOTSTRAP_CLEANUP_UNPROVED'];
   const system = { EACCES: 'RUNTIME_EXECUTION_DENIED', EROFS: 'RUNTIME_READONLY_PREPARATION_REQUIRED',
     ENOENT: 'RUNTIME_COMPONENT_MISSING' };
   report.failure_code = safe.includes(error?.message) ? error.message
@@ -135,6 +159,7 @@ finally {
   if (server) server.closeAllConnections?.();
   if (server) await new Promise(resolve => server.close(resolve));
   clearTimeout(deadline);
+  delete report.private_bootstrap_diagnostic;
   await writeFile('/tmp/native-proof.json', JSON.stringify(report));
   console.log(JSON.stringify(report)); process.exitCode = report.status === 'PASS' ? 0 : 2;
 }

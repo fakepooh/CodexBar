@@ -27,7 +27,8 @@ def failure_diagnostic(raw, stderr=b''):
                      'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE',
                      'SDK_OR_LOCAL_PROTOCOL_FAILURE', 'RUNTIME_EXECUTION_DENIED',
                      'RUNTIME_READONLY_PREPARATION_REQUIRED', 'RUNTIME_COMPONENT_MISSING',
-                     'BROKER_EXIT', 'BROKER_DEADLINE'}
+                     'BROKER_EXIT', 'BROKER_DEADLINE', 'SDK_BASELINE_STARTUP_FAILED',
+                     'BOOTSTRAP_CLEANUP_UNPROVED'}
             for key, allowed in [('failed_stage', stages), ('failure_code', codes)]:
                 if proof.get(key) in allowed:
                     result[key] = proof[key]

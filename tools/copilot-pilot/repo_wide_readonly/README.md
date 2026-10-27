@@ -14,6 +14,13 @@ when COPILOT_HOME is set. The shared client-options helper and constructor-only
 tests correct this without starting a runtime, changing CLI version or adding
 model permissions. Hosted authentication is still unproved until the next run.
 
+The SDK-server bootstrap is tested separately from CLI application flags by
+bounded, credential-free initialization-only probes. Model permissions are
+enforced by SDK empty mode, explicit session availableTools, deny-by-default
+permission/hooks, disabled config/custom-instruction discovery and exact receiver
+catalog validation. Unsupported CLI flags must never be treated as protection.
+The isolated root/source mounts and noexec temporary filesystem remain enforced.
+
 This follow-up package adds the native isolation, historical snapshot, remote
 CAS and encrypted recovery acceptance path. Local deterministic tests are not
 presented as hosted proof. Existing CI and merge protections remain required.
