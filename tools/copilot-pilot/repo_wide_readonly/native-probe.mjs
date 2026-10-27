@@ -7,6 +7,7 @@ import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { BrokerRpc, NAMES, toolset, permission, hooks } from './sdk-tools.mjs';
 import { emptyClientOptions, initializationOnly } from './client-options.mjs';
+import { completionFixture } from './mock-completions.mjs';
 
 let client, session, rpc, server, broker;
 let stage = 'os_boundary';
@@ -65,16 +66,8 @@ try {
         if (received.join('\n').includes('PRIVATE_HOST_SENTINEL')) throw Error('HOST_LEAK');
         const step = planned[report.mock_requests - 1];
         if (report.mock_requests > planned.length + 1) throw Error('UNEXPECTED_ADDITIONAL_CALL');
-        const delta = step ? { role: 'assistant', tool_calls: [{ index: 0, id: 'probe-' + report.mock_requests,
-          type: 'function', function: { name: step[0], arguments: JSON.stringify(step[1]) } }] }
-          : { role: 'assistant', content: 'OFFLINE_CALLBACK_PROOF_COMPLETE' };
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.write('data: ' + JSON.stringify({ id: 'probe', object: 'chat.completion.chunk', model: 'offline-tool-stub',
-          choices: [{ index: 0, delta, finish_reason: null }] }) + '\n\n');
-        res.write('data: ' + JSON.stringify({ id: 'probe', object: 'chat.completion.chunk', model: 'offline-tool-stub',
-          choices: [{ index: 0, delta: {}, finish_reason: step ? 'tool_calls' : 'stop' }],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }) + '\n\n');
-        res.end('data: [DONE]\n\n');
+        const response = completionFixture(step, report.mock_requests, body.stream);
+        res.writeHead(200, { 'Content-Type': response.contentType }); res.end(response.body);
       } catch (error) {
         const allowed = ['RECEIVER_CREDENTIAL_IN_CONTEXT', 'TOOL_CATALOG',
           'TOOL_RESULT_ORDER_OR_CONTENT', 'UNEXPECTED_ADDITIONAL_CALL', 'PRIVATE_DIAGNOSTIC_LIMIT'];
