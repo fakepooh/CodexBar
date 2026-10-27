@@ -34,6 +34,38 @@ jobs:
         env:
           PYTHONPATH: tools/copilot-pilot
         run: python3 -m repo_wide_readonly.hosted_offline --output "$RUNNER_TEMP/repo-wide-native"
+      - name: Encrypt credential-free startup diagnostic on failure
+        id: startup-diagnostic
+        if: ${{ failure() }}
+        env:
+          COPILOT_REPO_WIDE_PUBLIC_RECIPIENT: ${{ secrets.COPILOT_REPO_WIDE_PUBLIC_RECIPIENT }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/repo-wide-native/private-startup.json" ]]; then
+            python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'repo-wide-native'
+          identity = {'purpose': 'offline-native-startup-diagnostic-v1', 'run_id': os.environ['GITHUB_RUN_ID'],
+                      'commit': os.environ['GITHUB_SHA'],
+                      'plaintext_sha256': hashlib.sha256((root / 'private-startup.json').read_bytes()).hexdigest()}
+          (root / 'startup-identity.json').write_text(json.dumps(identity))
+          PY
+            node tools/copilot-pilot/repo_wide_readonly/seal-file.mjs \
+              "$RUNNER_TEMP/repo-wide-native/private-startup.json" \
+              "$RUNNER_TEMP/repo-wide-native/startup-envelope.json" \
+              "$RUNNER_TEMP/repo-wide-native/startup-identity.json"
+            echo 'sealed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload only recipient-encrypted startup diagnostic
+        if: ${{ failure() && steps.startup-diagnostic.outputs.sealed == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repo-wide-startup-diagnostic-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/repo-wide-native/startup-envelope.json
+            ${{ runner.temp }}/repo-wide-native/startup-identity.json
+            ${{ runner.temp }}/repo-wide-native/receipt.json
       - name: Reconstruct all ten complete historical trees and diffs (never execute)
         env:
           PYTHONPATH: tools/copilot-pilot

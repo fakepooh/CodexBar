@@ -112,6 +112,14 @@ try {
   report.local_receiver_authenticated = true; report.exact_tool_result_order_verified = true;
 } catch (error) {
   report.reason = 'NATIVE_OFFLINE_PROOF_FAILED'; report.failed_stage = stage;
+  // This stage precedes session creation/provider credentials and has no real
+  // credentials or historical source. Parent captures stdout privately and
+  // encrypts this diagnostic; it must never print this field to public logs.
+  if (stage === 'cli_initialization' && report.mock_requests === 0) {
+    report.private_startup_diagnostic = JSON.stringify({
+      error: String(error?.stack || error?.message || ''),
+      stderr: String(client?.stderrBuffer || '') }).split(receiverNonce).join('[LOCAL_NONCE_REDACTED]').slice(0, 32768);
+  }
   const safe = ['NETWORK_NOT_NONE', 'CREDENTIAL_ENV', 'OS_ISOLATION', 'CLI_PIN',
     'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE', 'BROKER_EXIT', 'BROKER_DEADLINE'];
   const system = { EACCES: 'RUNTIME_EXECUTION_DENIED', EROFS: 'RUNTIME_READONLY_PREPARATION_REQUIRED',

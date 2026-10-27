@@ -30,6 +30,9 @@ class HostedOrchestration(unittest.TestCase):
              patch('repo_wide_readonly.hosted_offline.subprocess.run', side_effect=command), \
              contextlib.redirect_stdout(io.StringIO()):
             report = run(Path(tmp) / 'owned')
+            private = Path(tmp) / 'owned/private-startup.json'
+            if private.exists():
+                self.assertEqual(private.stat().st_mode & 0o777, 0o600)
         return report, calls
 
     def test_success_requires_exact_native_proof_and_cleanup(self):
@@ -61,12 +64,14 @@ class HostedOrchestration(unittest.TestCase):
     def test_failed_child_keeps_only_bounded_safe_diagnostic_and_never_passes(self):
         proof = {'status': 'BLOCKED', 'failed_stage': 'cli_initialization',
                  'failure_code': 'RUNTIME_EXECUTION_DENIED', 'mock_requests': 0,
+                 'private_startup_diagnostic': 'PRIVATE_FIXTURE_SENTINEL',
                  'private_error': 'PRIVATE_FIXTURE_SENTINEL'}
         r, calls = self.execute(proof=proof, exit_code=2, stderr=b'EACCES PRIVATE_FIXTURE_SENTINEL')
         self.assertEqual(r['status'], 'BLOCKED')
         self.assertEqual(r['native_process_exit_code'], 2)
         self.assertEqual(r['native_failure']['failure_code'], 'RUNTIME_EXECUTION_DENIED')
         self.assertNotIn('PRIVATE_FIXTURE_SENTINEL', json.dumps(r))
+        self.assertRegex(r['private_startup_sha256'], r'^[0-9a-f]{64}$')
         self.assertTrue(r['owned_container_absent_after_cleanup'])
         self.assertEqual(sum(a[:2] == ['docker', 'run'] for a, _ in calls), 1)
 

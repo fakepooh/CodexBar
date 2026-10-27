@@ -61,6 +61,19 @@ def run(output):
             if stage == 'native_cli_broker_transport':
                 report['native_process_exit_code'] = result.returncode
                 report['native_failure'] = failure_diagnostic(result.stdout, result.stderr)
+                try:
+                    proof = json.loads(result.stdout) if len(result.stdout) <= 1048576 else {}
+                    diagnostic = proof.get('private_startup_diagnostic')
+                    if (proof.get('failed_stage') == 'cli_initialization'
+                            and type(proof.get('mock_requests')) is int and proof['mock_requests'] == 0
+                            and isinstance(diagnostic, str) and len(diagnostic.encode()) <= 131072):
+                        private = output / 'private-startup.json'
+                        fd = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                        with os.fdopen(fd, 'w') as stream:
+                            stream.write(canonical({'stage': 'cli_initialization', 'diagnostic': diagnostic}))
+                        report['private_startup_sha256'] = sha(private.read_bytes())
+                except (ValueError, TypeError, AttributeError):
+                    pass
             raise ValueError('OFFLINE_STAGE_FAILED')
         return result.stdout
     report = {'status': 'BLOCKED', 'real_model_requests': 0, 'live_reservations_created': 0}
