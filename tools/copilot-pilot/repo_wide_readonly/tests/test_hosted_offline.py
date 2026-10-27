@@ -30,7 +30,7 @@ class HostedOrchestration(unittest.TestCase):
              patch('repo_wide_readonly.hosted_offline.subprocess.run', side_effect=command), \
              contextlib.redirect_stdout(io.StringIO()):
             report = run(Path(tmp) / 'owned')
-            private = Path(tmp) / 'owned/private-startup.json'
+            private = Path(tmp) / 'owned/private-native.json'
             if private.exists():
                 self.assertEqual(private.stat().st_mode & 0o777, 0o600)
         return report, calls
@@ -64,14 +64,14 @@ class HostedOrchestration(unittest.TestCase):
     def test_failed_child_keeps_only_bounded_safe_diagnostic_and_never_passes(self):
         proof = {'status': 'BLOCKED', 'failed_stage': 'cli_initialization',
                  'failure_code': 'RUNTIME_EXECUTION_DENIED', 'mock_requests': 0,
-                 'private_startup_diagnostic': 'PRIVATE_FIXTURE_SENTINEL',
+                 'private_native_diagnostic': 'PRIVATE_FIXTURE_SENTINEL',
                  'private_error': 'PRIVATE_FIXTURE_SENTINEL'}
         r, calls = self.execute(proof=proof, exit_code=2, stderr=b'EACCES PRIVATE_FIXTURE_SENTINEL')
         self.assertEqual(r['status'], 'BLOCKED')
         self.assertEqual(r['native_process_exit_code'], 2)
         self.assertEqual(r['native_failure']['failure_code'], 'RUNTIME_EXECUTION_DENIED')
         self.assertNotIn('PRIVATE_FIXTURE_SENTINEL', json.dumps(r))
-        self.assertRegex(r['private_startup_sha256'], r'^[0-9a-f]{64}$')
+        self.assertRegex(r['private_native_sha256'], r'^[0-9a-f]{64}$')
         self.assertTrue(r['owned_container_absent_after_cleanup'])
         self.assertEqual(sum(a[:2] == ['docker', 'run'] for a, _ in calls), 1)
 
@@ -81,6 +81,16 @@ class HostedOrchestration(unittest.TestCase):
             proof = failure_diagnostic(raw)
             self.assertNotIn('PRIVATE_FIXTURE_SENTINEL', json.dumps(proof))
             self.assertNotIn('mock_requests', proof)
+
+    def test_complete_large_protocol_fixture_is_private_and_report_remains_bounded(self):
+        proof = {'failed_stage': 'local_callback_transport', 'mock_requests': 6,
+                 'callback_count': 2, 'receiver_failure_code': 'TOOL_RESULT_ORDER_OR_CONTENT',
+                 'private_native_diagnostic': 'PRIVATE_PROTOCOL_FIXTURE_' + 'x' * 1200000}
+        report, _ = self.execute(proof=proof, exit_code=2)
+        self.assertRegex(report['private_native_sha256'], r'^[0-9a-f]{64}$')
+        self.assertEqual(report['native_failure']['callback_count'], 2)
+        self.assertNotIn('PRIVATE_PROTOCOL_FIXTURE_', json.dumps(report))
+        self.assertLess(len(json.dumps(report)), 2048)
 
     def test_bad_or_untyped_receipts_rejected(self):
         for proof in [{'status': 'PASS'}, {'status': 'PASS', 'real_model_requests': False},

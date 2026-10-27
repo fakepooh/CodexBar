@@ -10,6 +10,8 @@ import { emptyClientOptions, initializationOnly } from './client-options.mjs';
 
 let client, session, rpc, server, broker;
 let stage = 'os_boundary';
+const privateTransport = [];
+let privateTransportBytes = 0;
 const report = { status: 'BLOCKED', real_model_requests: 0, model_consumption_proven: false,
   native_cli_version: null, mock_requests: 0, selected_tools: null };
 // Ephemeral local receiver authentication, not a GitHub/API credential.
@@ -49,6 +51,9 @@ try {
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString()); report.mock_requests++;
         if (JSON.stringify(body).includes(receiverNonce)) throw Error('RECEIVER_CREDENTIAL_IN_CONTEXT');
+        const raw = Buffer.concat(chunks).toString(); privateTransportBytes += Buffer.byteLength(raw);
+        if (privateTransportBytes > 8388608) throw Error('PRIVATE_DIAGNOSTIC_LIMIT');
+        privateTransport.push(raw);
         const names = (body.tools || []).map(t => t.function?.name || t.name).sort();
         if (JSON.stringify(names) !== JSON.stringify([...NAMES].sort())) throw Error('TOOL_CATALOG');
         report.selected_tools = names;
@@ -70,7 +75,12 @@ try {
           choices: [{ index: 0, delta: {}, finish_reason: step ? 'tool_calls' : 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }) + '\n\n');
         res.end('data: [DONE]\n\n');
-      } catch { report.receiver_failed = true; res.writeHead(400); res.end(); }
+      } catch (error) {
+        const allowed = ['RECEIVER_CREDENTIAL_IN_CONTEXT', 'TOOL_CATALOG',
+          'TOOL_RESULT_ORDER_OR_CONTENT', 'UNEXPECTED_ADDITIONAL_CALL', 'PRIVATE_DIAGNOSTIC_LIMIT'];
+        report.receiver_failure_code = allowed.includes(error?.message) ? error.message : 'MOCK_PROTOCOL_REJECTED';
+        report.receiver_failed = true; res.writeHead(400); res.end();
+      }
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -135,14 +145,21 @@ try {
   report.local_receiver_authenticated = true; report.exact_tool_result_order_verified = true;
 } catch (error) {
   report.reason = 'NATIVE_OFFLINE_PROOF_FAILED'; report.failed_stage = stage;
-  // This stage precedes session creation/provider credentials and has no real
-  // credentials or historical source. Parent captures stdout privately and
-  // encrypts this diagnostic; it must never print this field to public logs.
-  if (stage === 'cli_initialization' && report.mock_requests === 0) {
-    report.private_startup_diagnostic = JSON.stringify({ bootstrap: report.private_bootstrap_diagnostic,
+  // Entire probe is credential-free/network-none and uses synthetic sources.
+  // Never capture headers. Body nonce checks precede capture. Parent encrypts
+  // this field and publishes only bounded labels/hashes, never raw payloads.
+  if (report.os_isolation && Object.values(report.os_isolation).every(x => x === true)) {
+    const diagnostic = JSON.stringify({ bootstrap: report.private_bootstrap_diagnostic,
       error: String(error?.stack || error?.message || ''),
-      stderr: String(client?.stderrBuffer || '') }).split(receiverNonce).join('[LOCAL_NONCE_REDACTED]').slice(0, 32768);
+      stderr: String(client?.stderrBuffer || ''), received_payloads: privateTransport,
+      callback_audit: rpc?.audit || [], receiver_failure_code: report.receiver_failure_code,
+      bootstrap_matrix: report.bootstrap_matrix });
+    report.private_native_diagnostic = diagnostic.length <= 16777216
+      ? diagnostic.split(receiverNonce).join('[LOCAL_NONCE_REDACTED]')
+        .split(Buffer.from(receiverNonce).toString('base64')).join('[LOCAL_NONCE_REDACTED]')
+      : JSON.stringify({ capture_status: 'EXPLICIT_DIAGNOSTIC_LIMIT', stage });
   }
+  report.callback_count = rpc?.audit.length || 0;
   const safe = ['NETWORK_NOT_NONE', 'CREDENTIAL_ENV', 'OS_ISOLATION', 'CLI_PIN',
     'SESSION_LIMIT_UNPROVED', 'CALLBACK_PROOF_INCOMPLETE', 'BROKER_EXIT', 'BROKER_DEADLINE',
     'SDK_BASELINE_STARTUP_FAILED', 'BOOTSTRAP_CLEANUP_UNPROVED'];

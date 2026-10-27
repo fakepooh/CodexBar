@@ -18,7 +18,7 @@ def failure_diagnostic(raw, stderr=b''):
     """Only fixed labels/types leave the credential-free child; never raw errors."""
     result = {'receipt': 'UNAVAILABLE'}
     try:
-        proof = json.loads(raw) if len(raw) <= 1048576 else None
+        proof = json.loads(raw) if len(raw) <= 67108864 else None
         if isinstance(proof, dict):
             result['receipt'] = 'PRESENT'
             stages = {'os_boundary', 'local_receiver', 'cli_initialization',
@@ -32,8 +32,14 @@ def failure_diagnostic(raw, stderr=b''):
             for key, allowed in [('failed_stage', stages), ('failure_code', codes)]:
                 if proof.get(key) in allowed:
                     result[key] = proof[key]
-            if type(proof.get('mock_requests')) is int and 0 <= proof['mock_requests'] <= 6:
+            if type(proof.get('mock_requests')) is int and 0 <= proof['mock_requests'] <= 64:
                 result['mock_requests'] = proof['mock_requests']
+            if type(proof.get('callback_count')) is int and 0 <= proof['callback_count'] <= 200:
+                result['callback_count'] = proof['callback_count']
+            if proof.get('receiver_failure_code') in {'TOOL_CATALOG', 'TOOL_RESULT_ORDER_OR_CONTENT',
+                    'UNEXPECTED_ADDITIONAL_CALL', 'PRIVATE_DIAGNOSTIC_LIMIT', 'MOCK_PROTOCOL_REJECTED',
+                    'RECEIVER_CREDENTIAL_IN_CONTEXT'}:
+                result['receiver_failure_code'] = proof['receiver_failure_code']
     except (ValueError, TypeError):
         pass
     result['stderr_class'] = next((name for marker, name in [
@@ -63,16 +69,16 @@ def run(output):
                 report['native_process_exit_code'] = result.returncode
                 report['native_failure'] = failure_diagnostic(result.stdout, result.stderr)
                 try:
-                    proof = json.loads(result.stdout) if len(result.stdout) <= 1048576 else {}
-                    diagnostic = proof.get('private_startup_diagnostic')
-                    if (proof.get('failed_stage') == 'cli_initialization'
-                            and type(proof.get('mock_requests')) is int and proof['mock_requests'] == 0
-                            and isinstance(diagnostic, str) and len(diagnostic.encode()) <= 131072):
-                        private = output / 'private-startup.json'
+                    proof = json.loads(result.stdout) if len(result.stdout) <= 67108864 else {}
+                    diagnostic = proof.get('private_native_diagnostic')
+                    if (proof.get('failed_stage') in {'cli_initialization', 'local_session_configuration', 'local_callback_transport'}
+                            and type(proof.get('mock_requests')) is int and 0 <= proof['mock_requests'] <= 64
+                            and isinstance(diagnostic, str) and len(diagnostic.encode()) <= 33554432):
+                        private = output / 'private-native.json'
                         fd = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                         with os.fdopen(fd, 'w') as stream:
-                            stream.write(canonical({'stage': 'cli_initialization', 'diagnostic': diagnostic}))
-                        report['private_startup_sha256'] = sha(private.read_bytes())
+                            stream.write(canonical({'stage': proof['failed_stage'], 'diagnostic': diagnostic}))
+                        report['private_native_sha256'] = sha(private.read_bytes())
                 except (ValueError, TypeError, AttributeError):
                     pass
             raise ValueError('OFFLINE_STAGE_FAILED')
