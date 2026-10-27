@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "PUB-01",
+      "repository": "fakepooh/CodexBar",
+      "pr": 1,
+      "base": "36bf01ace1096d9386d6e36b0934809bcfe8ddda",
+      "head": "90eb7919ca38e69eeef675132e68e131169cdc87"
+    },
+    {
+      "id": "PUB-02",
+      "repository": "fakepooh/CodexBar",
+      "pr": 1,
+      "base": "36bf01ace1096d9386d6e36b0934809bcfe8ddda",
+      "head": "e8b480043d91eb9057a1d01d45566ff1602c3a00"
+    },
+    {
+      "id": "PUB-03",
+      "repository": "fakepooh/CodexBar",
+      "pr": 1,
+      "base": "36bf01ace1096d9386d6e36b0934809bcfe8ddda",
+      "head": "13e74f4f9a267b563fad105524181b79d907482c"
+    },
+    {
+      "id": "PUB-04",
+      "repository": "fakepooh/CodexBar",
+      "pr": 1,
+      "base": "36bf01ace1096d9386d6e36b0934809bcfe8ddda",
+      "head": "e336d3a771ad1d6c77d656a5ba03f2b943434b80"
+    },
+    {
+      "id": "PUB-05",
+      "repository": "fakepooh/homebridge-gree-airconditioner",
+      "pr": 1,
+      "base": "48365fdba6796499a8b54ea851fa474f6e236937",
+      "head": "42d99f24d67b635ff48e3dfe44e34a2d42485398"
+    },
+    {
+      "id": "PUB-06",
+      "repository": "fakepooh/homebridge-gree-airconditioner",
+      "pr": 1,
+      "base": "48365fdba6796499a8b54ea851fa474f6e236937",
+      "head": "dcfbb67c5b77a4d43b5bbe896870d56f32379970"
+    },
+    {
+      "id": "PUB-07",
+      "repository": "fakepooh/homebridge-gree-airconditioner",
+      "pr": 1,
+      "base": "48365fdba6796499a8b54ea851fa474f6e236937",
+      "head": "444dacfac3074473b3182f486f3a322e6e972259"
+    },
+    {
+      "id": "PUB-08",
+      "repository": "fakepooh/homebridge-gree-airconditioner",
+      "pr": 2,
+      "base": "48365fdba6796499a8b54ea851fa474f6e236937",
+      "head": "eb878e98c30265884b0eed9e47d9e7b19116ebf9"
+    },
+    {
+      "id": "PUB-09",
+      "repository": "fakepooh/CodexBar",
+      "pr": 1,
+      "base": "36bf01ace1096d9386d6e36b0934809bcfe8ddda",
+      "head": "245ebe7374348a263296ed2b648a1caf1392800c"
+    },
+    {
+      "id": "PUB-10",
+      "repository": "fakepooh/homebridge-gree-airconditioner",
+      "pr": 2,
+      "base": "48365fdba6796499a8b54ea851fa474f6e236937",
+      "head": "73eaf7ebbf3267a9f938ae2fcc7e7502cd4e9976"
+    }
+  ]
+}
