@@ -21,7 +21,10 @@ export function seal(plaintext, recipientPem, identity) {
 }
 
 export function open(envelope, recipientPrivatePem, expectedIdentity) {
+  const expectedRecipient = createHash('sha256').update(createPublicKey(recipientPrivatePem)
+    .export({ type: 'spki', format: 'der' })).digest('hex');
   if (envelope.version !== 'repo-wide-evidence-envelope-v1'
+      || envelope.recipient_sha256 !== expectedRecipient
       || JSON.stringify(envelope.identity) !== JSON.stringify(expectedIdentity)) throw Error('IDENTITY_MISMATCH');
   const key = privateDecrypt({ key: recipientPrivatePem, padding: constants.RSA_PKCS1_OAEP_PADDING,
     oaepHash: 'sha256' }, Buffer.from(envelope.wrapped_key, 'base64'));

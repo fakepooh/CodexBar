@@ -1,70 +1,71 @@
-# repo-wide-readonly-v1.0.0 — candidate, live disabled
+# Repo-wide readonly diagnostic candidate
 
-This is a separate candidate methodology for the ten existing PUB SHA pairs.
-It is not frozen, not a completed live adapter, and not evidence of hosted execution.
-Old methodologies, input selection and historical results are not modified.
+This is the new `repo-wide-readonly-v1.0.0` namespace, not a modification of
+frozen prompt-review v2.0.0, v2.1.0, v2.2.0 or v2.2.1. Status: **DRAFT,
+NOT FROZEN, NOT LIVE READY**. No live entry point is enabled.
 
-## Reviewer context and tools
+## Publication and execution are separate
 
-The snapshot builder reads exact Git objects and the complete cumulative binary diff,
-never checks out or executes historical code, and materializes every tracked blob.
-It records original Git modes, blob identities and SHA256. Symlinks are inert text;
-submodules/unsupported paths and tree-size overflows block the entire case.
-No .git/history, evaluator, future revision or harness is part of the snapshot.
+PR 5 delivered the initial preparation foundation. Required ARM64 CI passed;
+the existing application Sources, Tests and CI configuration are unchanged.
+The first manual hosted run passed infrastructure tests but stopped in the
+SDK constructor: empty mode requires an explicit persistence location even
+when COPILOT_HOME is set. The shared client-options helper and constructor-only
+tests correct this without starting a runtime, changing CLI version or adding
+model permissions. Hosted authentication is still unproved until the next run.
 
-The candidate broker exposes only view, grep and glob over an exact tracked inventory.
-It verifies hashes, refuses aliases/escape/untracked files, paginates whole lines,
-explicitly fragments long lines and implements literal search, not shell/regex execution.
-Binary content is explicitly classified; no claim of binary semantic analysis is made.
-Tool-use audit data is private and must be encrypted with the rest of each session.
+The SDK-server bootstrap is tested separately from CLI application flags by
+bounded, credential-free initialization-only probes. Model permissions are
+enforced by SDK empty mode, explicit session availableTools, deny-by-default
+permission/hooks, disabled config/custom-instruction discovery and exact receiver
+catalog validation. Unsupported CLI flags must never be treated as protection.
+The isolated root/source mounts and noexec temporary filesystem remain enforced.
 
-Official SDK1.0.22 supports overridesBuiltInTool. The intended production architecture
-replaces all three builtin file tools with these handlers and puts the broker in a
-separate network-none, readonly, unprivileged Ubuntu container with no credentials,
-harness, host home, proc credentials or container socket. The CLI process must not
-mount the historical tree; it reaches source only through the broker. Neither Python
-path validation nor readonly mounts alone are asserted to be the complete OS boundary.
-Actual native override dispatch and that boundary still require a hosted CLI-to-mock
-probe before any inference. No live execution path is enabled in this candidate.
+This follow-up package adds the native isolation, historical snapshot, remote
+CAS and encrypted recovery acceptance path. Local deterministic tests are not
+presented as hosted proof. Existing CI and merge protections remain required.
 
-## Hosted auth and billing
+## Source access
 
-GitHub Docs explicitly support GITHUB_TOKEN in a personal repository, billed to its
-owner's Copilot seat. The owner of fakepooh/CodexBar is a User, fakepooh/4489850.
-The sessionless probe is restricted to Github-hosted workflow_dispatch on that exact
-repository. It starts the pinned runtime, queries status/auth, and creates no session.
-Authentication alone is never allowance/paid-off proof. No conversion from chat,
-premium-request counters or percentages to included AI Credits is authorized.
-The new ten-session grant has no unknown-allowance exception. Paid usage stays off.
+`snapshot.py` reconstructs every tracked blob at the exact reviewed commit,
+with complete cumulative binary-capable diff and provenance. It never checks
+out or executes historical code. Symlinks are inert bytes. A 512 MiB total-tree
+limit blocks the entire case rather than removing source files.
 
-## One-shot reservations
+`broker.py` exposes literal search, wildcard path listing and bounded exact
+source reads, including explicit continuation cursors and base64 binary reads.
+`sdk-tools.mjs` registers only unique `repo_view`, `repo_grep`, `repo_glob`
+custom tools. Missing registration cannot fall back to native filesystem tools.
+Native shell/read/write/delegation/network/memory tools are unavailable.
+Model tool callbacks go to a separate credential-free network-none broker.
+This Python broker alone is not the OS boundary: actual hosted Docker mounts,
+UID/capabilities and isolation proof remain mandatory.
 
-A create-only Git ref per experiment/PUB is the proposed durable backend. Its signed
-intent must bind run_id, first run attempt, workflow SHA, methodology hash and prompt
-hash. A separate reservation job alone receives contents:write; the review job receives
-contents:read/copilot-requests:write. No update/delete/reset route exists. Remote CAS
-and rerun behavior are not proved by the in-memory contract tests. Reruns are denied.
+`native-probe.mjs` and `hosted_offline.py` prepare a credential-free real CLI
+1.0.98 to local mock proof, including exact tool-result transport, large output,
+blocked host path and finite stage deadlines. They have not run hosted yet.
+No local Docker, VM or CLI execution is permitted for this experiment.
+The workflow delivery template is manual-only and contains no live model route.
 
-## Private results and prompt
+## Authentication, guards and evidence
 
-Prompts are NOT in this public package. The fixed prompt requires a dedicated Actions
-secret (not public dispatch inputs). Only public recipient key material may be on the
-runner. Raw review/events/tool payloads must be sanitized for exact credentials and
-sealed before artifact upload. The envelope implementation has roundtrip/tamper tests;
-no recipient/private storage has yet been provisioned, no actual artifact recovery is
-claimed. Keys generated by unit tests are ephemeral fixtures only.
+`auth-preflight.mjs` performs sessionless hosted authentication only. It does
+not establish available included allowance, Free plan, paid-off status or live
+admissibility by itself. Actual hosted authentication remains unverified.
+Empty-mode persistence is explicit in a fresh temporary home; diagnostics name
+only the failed stage and never print raw exceptions or authentication responses.
 
-## Publication and live gate
+`reservations.py` defines strict typed one-shot identities. `ledger.py` uses
+create-only annotated Git refs, authenticated exact API endpoints, verified TLS,
+no redirects and no mutation retries. Reviewer jobs must have no contents-write
+permission. Actual remote CAS/rerun integration has not been proved.
 
-Canonical ShipTact change: chg-06ac42c6f5079c90 in the existing clean CodexBar delivery
-checkout. It selects github.cli and PR → CI → merge. Current management token is
-absent from environment and plaintext gh configuration; Keychain was not accessed.
-The GitHub connector works but is not the selected ShipTact delivery provider, so
-publishing directly through it would bypass the required route. The candidate has
-not been committed, pushed, published or run on GitHub. Existing published offline
-workflows and their disabled live placeholders remain unchanged.
+`seal.mjs` uses recipient-only RSA4096/AES256-GCM encryption. Only the public
+recipient may reach Actions. The exact approved generic prompt and public
+recipient were provisioned in dedicated Actions secrets; the private key remains
+in Work. `seal-file.mjs` pins the public recipient fingerprint. Actual hosted
+artifact download/decryption validation is still required.
 
-Remaining acceptance is enumerated in methodology.json. The workflow template is
-manual-only and cannot dispatch AI or reserve a live case. Completing these primitives
-or an auth-only PASS never enables the ten reviews. Full integration, hosted tests,
-private recovery, Billing and freeze must pass first.
+No old grant is reused. The new ten-case authorization is unconsumed. No live
+sessions or reservations have been created. The numerical included AI Credit
+allowance is unknown; no global budget policy or threshold was changed.
