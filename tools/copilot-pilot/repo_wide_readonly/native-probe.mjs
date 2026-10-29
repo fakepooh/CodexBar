@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { BrokerRpc, NAMES, toolset, permission, hooks } from './sdk-tools.mjs';
 import { emptyClientOptions, initializationOnly } from './client-options.mjs';
 import { completionFixture } from './mock-completions.mjs';
+import { prepareReview, requireOsProof } from './review-session.mjs';
 
 let client, session, rpc, server, broker;
 let stage = 'os_boundary';
@@ -34,7 +35,7 @@ try {
       stdio: ['pipe', 'pipe', 'pipe'] });
   broker.stderr.on('data', () => {}); rpc = new BrokerRpc(broker);
   const proof = await rpc.call('__probe__');
-  if (!proof.ok || !Object.values(proof.result).every(x => x === true)) throw Error('OS_ISOLATION');
+  requireOsProof(proof);
   report.os_isolation = proof.result;
   stage = 'local_receiver';
   server = http.createServer((req, res) => {
@@ -115,18 +116,17 @@ try {
   await client.start(); report.native_cli_version = (await client.getStatus()).version;
   if (report.native_cli_version !== '1.0.98') throw Error('CLI_PIN');
   stage = 'local_session_configuration';
-  session = await client.createSession({ model: 'offline-tool-stub', workingDirectory: '/tmp/home',
-    availableTools: NAMES, tools: toolset(rpc), onPermissionRequest: permission, hooks: hooks(),
-    skipCustomInstructions: true, sessionLimits: { maxAiCredits: 30 },
-    largeOutput: { enabled: false },
-    enableConfigDiscovery: false, mcpServers: {}, customAgents: [],
+  const prepared = await prepareReview(client, rpc, { model: 'offline-tool-stub', home: '/tmp/home',
     provider: { type: 'openai', baseUrl: env.COPILOT_PROVIDER_BASE_URL,
       wireApi: 'completions', apiKey: receiverNonce } });
-  const metadata = await session.rpc.metadata.snapshot();
+  session = prepared.session;
+  const metadata = prepared.metadata;
   if (metadata.sessionLimits?.maxAiCredits !== 30) throw Error('SESSION_LIMIT_UNPROVED');
   report.session_soft_credit_ceiling_verified = 30;
+  report.pre_dispatch_tool_catalog_verified = true;
+  if (report.mock_requests !== 0) throw Error('UNEXPECTED_PRE_DISPATCH_INFERENCE');
   stage = 'local_callback_transport';
-  const result = await session.sendAndWait({ prompt: 'OFFLINE TOOL CALLBACK FIXTURE. No real review or AI service.' }, 60000);
+  const result = await prepared.sendOnce('OFFLINE TOOL CALLBACK FIXTURE. No real review or AI service.', 60000);
   if (result?.data?.content !== 'OFFLINE_CALLBACK_PROOF_COMPLETE' || report.receiver_failed
       || report.mock_requests !== 6 || rpc.audit.length !== 5
       || rpc.audit.slice(0, 4).some(x => !x.ok) || rpc.audit[4].ok

@@ -1,6 +1,6 @@
 # Delivery template for .github/workflows/copilot-repo-wide-live.yml after the preparation PR.
-# NO live execution entry exists in this workflow.
-name: Copilot repo-wide hosted preflight (no AI)
+# Live dispatch requires a frozen adapter, fresh owner admission and an unused remote guard.
+name: Copilot repo-wide hosted pilot
 'on':
   workflow_dispatch:
     inputs:
@@ -8,6 +8,19 @@ name: Copilot repo-wide hosted preflight (no AI)
         description: Sessionless pinned CLI authentication only
         type: boolean
         default: false
+      execute_live:
+        description: One authorized prompt-based review; never retry this run
+        type: boolean
+        default: false
+      review_case:
+        description: One case only (one durable guard per PUB)
+        type: choice
+        options: [PUB-01, PUB-02, PUB-03, PUB-04, PUB-05, PUB-06, PUB-07, PUB-08, PUB-09, PUB-10]
+        default: PUB-01
+      preflight_nonce:
+        description: Exact nonce of the fresh private admission receipt
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -34,6 +47,10 @@ jobs:
         env:
           PYTHONPATH: tools/copilot-pilot
         run: python3 -m repo_wide_readonly.hosted_offline --output "$RUNNER_TEMP/repo-wide-native"
+      - name: Require pre-dispatch catalog proof from the shared production session path
+        env:
+          PYTHONPATH: tools/copilot-pilot
+        run: python3 -m repo_wide_readonly.live_control check-offline --proof "$RUNNER_TEMP/repo-wide-native/native-proof.json"
       - name: Encrypt credential-free native diagnostic on failure
         id: startup-diagnostic
         if: ${{ failure() }}
@@ -102,7 +119,7 @@ jobs:
             ${{ runner.temp }}/repo-wide-native/native-proof.json
             ${{ runner.temp }}/repo-wide-historical/summary.json
   sessionless-auth:
-    if: ${{ inputs.authentication_probe }}
+    if: ${{ inputs.authentication_probe || inputs.execute_live }}
     needs: offline
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -136,3 +153,57 @@ jobs:
           PYTHONPATH: tools/copilot-pilot
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 -m repo_wide_readonly.ledger_fixture
+  reserve:
+    if: ${{ inputs.execute_live }}
+    needs: [offline, sessionless-auth]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify frozen owner admission and atomically reserve this case once
+        env:
+          PYTHONPATH: tools/copilot-pilot
+          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_REPO_WIDE_ADMISSION: ${{ secrets.COPILOT_REPO_WIDE_ADMISSION }}
+          PREFLIGHT_NONCE: ${{ inputs.preflight_nonce }}
+          REVIEW_CASE: ${{ inputs.review_case }}
+        run: python3 -m repo_wide_readonly.live_control reserve
+  review:
+    if: ${{ inputs.execute_live }}
+    needs: reserve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+      actions: read
+      copilot-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Exactly one isolated review handoff; no application or session retries
+        env:
+          PYTHONPATH: tools/copilot-pilot
+          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_REPO_WIDE_ADMISSION: ${{ secrets.COPILOT_REPO_WIDE_ADMISSION }}
+          COPILOT_REPO_WIDE_PROMPT: ${{ secrets.COPILOT_REPO_WIDE_PROMPT }}
+          COPILOT_REPO_WIDE_PUBLIC_RECIPIENT: ${{ secrets.COPILOT_REPO_WIDE_PUBLIC_RECIPIENT }}
+          PREFLIGHT_NONCE: ${{ inputs.preflight_nonce }}
+          REVIEW_CASE: ${{ inputs.review_case }}
+        run: python3 -m repo_wide_readonly.live_host --execute --output "$RUNNER_TEMP/repo-wide-live"
+      - name: Preserve only recipient-encrypted private output and safe receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repo-wide-encrypted-${{ inputs.review_case }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            ${{ runner.temp }}/repo-wide-live/encrypted-review.json
+            ${{ runner.temp }}/repo-wide-live/identity.json
+            ${{ runner.temp }}/repo-wide-live/receipt.json

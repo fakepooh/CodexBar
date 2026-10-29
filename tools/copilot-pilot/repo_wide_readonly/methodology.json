@@ -9,7 +9,7 @@
   "max_sessions_per_case": 1,
   "automatic_retries": false,
   "only_included_allowance": true,
-  "unknown_allowance_exception": false,
+  "unknown_allowance_exception": true,
   "additional_paid_usage_permitted": false,
   "general_budget_policy_changed": false,
   "execution_environment": "GitHub-hosted ubuntu-24.04 only",
@@ -18,7 +18,7 @@
     "repo_grep",
     "repo_glob"
   ],
-  "tools_implementation": "Unique official SDK custom read/search tools backed by a separate credential-free OS-isolated broker; no native-tool fallback. Actual native callback and OS boundary await GitHub-hosted proof.",
+  "tools_implementation": "Shared SDK session constructor with pre-dispatch catalog validation and separate credential-free readonly broker; real CLI/mock transport acceptance required before freeze",
   "no_custom_instructions": true,
   "repository_history_access": false,
   "complete_tracked_head_tree": true,
@@ -43,5 +43,6 @@
   ],
   "management_auth": "Standard existing gh credential; Keychain explicitly permitted by user clarification. Never a live Copilot credential relay.",
   "private_prompt_secret_provisioned": true,
-  "public_recipient_secret_provisioned": true
+  "public_recipient_secret_provisioned": true,
+  "budget_exception_scope": "Explicit 2026-10-29 owner decision for this new series only; no previous authorization or guard reset"
 }
