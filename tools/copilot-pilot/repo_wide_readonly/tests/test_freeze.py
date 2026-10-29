@@ -15,7 +15,7 @@ class FreezeTests(unittest.TestCase):
         for name in ['ci.yml', 'copilot-repo-wide-live.yml']:
             (self.workflow / name).write_text('fixture-workflow-' + name)
         (self.root / 'adapter.mjs').write_text('FIXTURE; no model or secret')
-        (self.root / 'methodology.json').write_text(json.dumps({'status': 'FROZEN', 'unknown_allowance_exception': True}))
+        (self.root / 'methodology.json').write_text(json.dumps({'status': 'FROZEN', 'unknown_allowance_exception': True, 'live_enabled': True}))
 
     def tearDown(self): self.temp.cleanup()
 
@@ -44,6 +44,15 @@ class FreezeTests(unittest.TestCase):
         before = path.read_bytes()
         with self.assertRaises(ValueError): create(self.root)
         self.assertEqual(path.read_bytes(), before)
+
+    def test_disabled_or_unapproved_live_configuration_cannot_freeze(self):
+        path = self.root / 'methodology.json'
+        for key in ['live_enabled', 'unknown_allowance_exception']:
+            for value in [False, None, 1, 'true']:
+                method = {'status': 'FROZEN', 'unknown_allowance_exception': True, 'live_enabled': True}
+                method[key] = value; path.write_text(json.dumps(method))
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError): create(self.root)
+                self.assertFalse((self.root / 'freeze.json').exists())
 
 
 if __name__ == '__main__': unittest.main()

@@ -1,6 +1,8 @@
 # Repo-wide readonly diagnostic
 
-`repo-wide-readonly-v1.0.0`, currently **DRAFT, NOT FROZEN, NOT LIVE READY**.
+`repo-wide-readonly-v1.0.0`: **FROZEN** implementation. Live dispatch remains
+blocked until exact-head independent review, full non-draft CI, ShipTact merge
+and a fresh owner Billing admission all pass. Workflow live defaults to false.
 This new diagnostic uses the existing ten PUB historical cases, not a blind
 holdout. Previous frozen methods, results, consumed grants and the paused holdout
 search are separate and unchanged. No local VM, Docker or Copilot runtime is used.
@@ -13,8 +15,13 @@ remote fixture CAS and independent recipient artifact recovery.
 
 ## Production admission
 
-The production implementation must pass its OWN hosted shared-session acceptance
-before freezing. Prior prototype success is not proof of this changed adapter.
+The production implementation passed its own hosted actual-entry acceptance in
+run 40916087242: 72 Python/27 Node tests, all ten whole historical trees/diffs,
+network-none CLI/mock transport, sessionless auth and exact private-prompt hash.
+The final admission correction adds two Python tests; the frozen release must
+repeat that full acceptance. Candidate 3719744 passed independent GitHub Codex
+review; final frozen-candidate review remains mandatory before merge/live.
+Prior prototype success is not proof of this adapter.
 `review-session.mjs` is shared by the real CLI/mock probe and live entry. It
 initializes and inspects the actual offered tool metadata before send. Only the
 three unique broker read/search tools are accepted. Wrong routing, missing tools,
@@ -36,7 +43,10 @@ It contains version, case, nonce, workflow_sha, freeze_sha256, observed_at,
 account, owner_id, copilot_free, additional_paid_usage, included_display,
 unknown_allowance_exception, budget_exception_sha256 and ci_run_id. The observed
 Billing state expires after one hour and is rechecked after preparation. No
-numerical allowance is invented from percentages. The owner's explicit
+numerical allowance is invented from percentages. The admission accepts only a
+strict non-exhausted percentage display (for example `7% used`), preserves it
+verbatim, and rejects `100% used`, unknown or malformed displays. This conservative
+gate does not quantify remaining credits or guarantee any budget percentage. The owner's explicit
 2026-10-29 exception applies only to this new series, max10/one per PUB. General
 10%/30% policy and previous grants are not changed or reused. A 30-credit SDK
 session ceiling is SOFT, not a hard account limit or proof of included allowance.
@@ -80,3 +90,8 @@ Freeze only after tests, real CLI/shared-session mock acceptance and independent
 exact-head review. `freeze.py create` is create-only; subsequent implementation,
 policy, schema, prompt hash or workflow drift blocks admission. A needed semantic
 change after freeze requires another methodology version.
+
+`prompt_delivery.wire_sha256` hashes the decoded user-message text including the
+pinned SDK timestamp envelope; it is not the hash of an entire HTTP request body.
+Freeze creation requires explicit live configuration and the series exception;
+this does not bypass any runtime admission, fresh Billing, CI or one-shot guard.

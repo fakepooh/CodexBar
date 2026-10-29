@@ -31,7 +31,7 @@ class AdmissionTests(unittest.TestCase):
         self.value = {'version': 1, 'case': 'PUB-01', 'nonce': 'd' * 64,
                       'workflow_sha': 'a' * 40, 'freeze_sha256': 'f' * 64,
                       'observed_at': self.now.isoformat(), 'account': 'fakepooh', 'owner_id': 4489850,
-                      'copilot_free': True, 'additional_paid_usage': False, 'included_display': 'rounded only',
+                      'copilot_free': True, 'additional_paid_usage': False, 'included_display': '7% used',
                       'unknown_allowance_exception': True, 'budget_exception_sha256': policy['budget_exception_sha256'],
                       'ci_run_id': 456}
         self.frozen = {'freeze_sha256': 'f' * 64, 'methodology_sha256': 'e' * 64}
@@ -64,6 +64,17 @@ class AdmissionTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.call(now=self.now + dt.timedelta(seconds=seconds))
         raw = json.dumps(self.value)[:-1] + ',"additional_paid_usage":false}'
         with self.assertRaises(ValueError): control.admission(self.env, raw, self.now, self.root)
+
+    def test_rounded_display_does_not_admit_exhaustion_or_invent_allowance(self):
+        for display in ['0% used', '7% used', '99% used', '99.999% used']:
+            value = dict(self.value, included_display=display)
+            admitted, _, _ = self.call(value)
+            self.assertEqual(admitted['included_display'], display)
+            self.assertNotIn('included_ai_credits', admitted)
+        for display in ['100% used', '100.0% used', '101% used', '-1% used',
+                        'unknown', 'rounded only', '', 'NaN% used', True, 7, '7% used\n']:
+            with self.subTest(display=display), self.assertRaises(ValueError):
+                self.call(dict(self.value, included_display=display))
 
     def test_rejected_admission_never_reads_credential_or_reserves(self):
         class Guarded(dict):

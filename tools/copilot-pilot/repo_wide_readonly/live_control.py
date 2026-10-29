@@ -67,7 +67,10 @@ def admission(env, raw, now=None, root=ROOT):
             or value['nonce'] != env.get('PREFLIGHT_NONCE')
             or value['case'] != env.get('REVIEW_CASE')
             or type(value['ci_run_id']) is not int or value['ci_run_id'] < 1
-            or not isinstance(value['included_display'], str) or not value['included_display']):
+            # A rounded percentage is not a credit allowance. Accept only the
+            # observed non-exhausted display, never an explicit 100% or unknown.
+            or not isinstance(value['included_display'], str)
+            or not re.fullmatch(r'(?:0|[1-9][0-9]?)(?:\.[0-9]{1,3})?% used', value['included_display'])):
         raise ValueError('ADMISSION_BINDING_OR_BILLING_FAILED')
     observed = dt.datetime.fromisoformat(value['observed_at'])
     if observed.tzinfo is None or not 0 <= (now - observed).total_seconds() <= 3600:

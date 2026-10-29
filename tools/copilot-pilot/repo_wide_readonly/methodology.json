@@ -1,6 +1,6 @@
 {
   "methodology": "repo-wide-readonly-v1.0.0",
-  "status": "DRAFT_NOT_FROZEN_NOT_LIVE_READY",
+  "status": "FROZEN",
   "baseline_cli_version": "1.0.98",
   "cli_version": "1.0.98",
   "sdk_version": "1.0.22",
@@ -32,13 +32,13 @@
   "public_plaintext_prompts_or_outputs": false,
   "prompt_source": "dedicated Actions secret; never dispatch input or repository file",
   "durable_reservation": "atomic create-only Git ref bound to experiment/case/run/attempt/workflow/methodology/prompt; separate contents-write job; live reader cannot write ledger",
-  "live_enabled": false,
+  "live_enabled": true,
   "blocking_acceptance": [
     "Real GitHub-hosted authentication-only probe",
     "Actual real CLI-to-mock SDK custom-tool callback and broker OS-boundary probe",
     "Remote reservation implementation and hosted race/rerun tests",
     "Hosted recipient-encrypted artifact recovery validation",
-    "Fresh owner Free/paid-off evidence and authoritative included allowance admissibility",
+    "Fresh owner Free/paid-off evidence, non-exhausted Billing display and explicit series-only unknown-allowance exception",
     "Full live executor, immutable methodology freeze and exact authorized run bindings"
   ],
   "management_auth": "Standard existing gh credential; Keychain explicitly permitted by user clarification. Never a live Copilot credential relay.",

@@ -34,7 +34,8 @@ def verify(root):
             or value.get('files') != inventory(root) or value.get('workflows') != workflows(root)):
         raise ValueError('FROZEN_IMPLEMENTATION_MISMATCH')
     method = json.loads((root / 'methodology.json').read_text())
-    if method.get('status') != 'FROZEN' or method.get('unknown_allowance_exception') is not True:
+    if (method.get('status') != 'FROZEN' or method.get('unknown_allowance_exception') is not True
+            or method.get('live_enabled') is not True):
         raise ValueError('UNFROZEN_OR_UNAUTHORIZED_METHOD')
     return {'freeze_sha256': sha((root / 'freeze.json').read_bytes()),
             'methodology_sha256': sha((root / 'methodology.json').read_bytes()), 'files': len(value['files'])}
@@ -45,7 +46,9 @@ def create(root):
     draft_bytes = (canonical(DRAFT) + '\n').encode()
     if path.exists() and path.read_bytes() != draft_bytes:
         raise ValueError('FREEZE_IS_IMMUTABLE_CREATE_NEW_METHOD_VERSION')
-    if json.loads((root / 'methodology.json').read_text()).get('status') != 'FROZEN':
+    method = json.loads((root / 'methodology.json').read_text())
+    if (method.get('status') != 'FROZEN' or method.get('unknown_allowance_exception') is not True
+            or method.get('live_enabled') is not True):
         raise ValueError('METHOD_MUST_BE_EXPLICITLY_FROZEN_FIRST')
     value = {'methodology': 'repo-wide-readonly-v1.0.0', 'status': 'FROZEN',
              'files': inventory(root), 'workflows': workflows(root)}
