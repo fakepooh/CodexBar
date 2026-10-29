@@ -5,13 +5,15 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { BrokerRpc, NAMES, toolset, permission, hooks } from './sdk-tools.mjs';
+import { BrokerRpc, NAMES, digest } from './sdk-tools.mjs';
 import { emptyClientOptions, initializationOnly } from './client-options.mjs';
 import { completionFixture } from './mock-completions.mjs';
+import { prepareReview, requireOsProof } from './review-session.mjs';
 
 let client, session, rpc, server, broker;
 let stage = 'os_boundary';
 const privateTransport = [];
+let privateEntryDiagnostic;
 let privateTransportBytes = 0;
 const report = { status: 'BLOCKED', real_model_requests: 0, model_consumption_proven: false,
   native_cli_version: null, mock_requests: 0, selected_tools: null };
@@ -34,7 +36,7 @@ try {
       stdio: ['pipe', 'pipe', 'pipe'] });
   broker.stderr.on('data', () => {}); rpc = new BrokerRpc(broker);
   const proof = await rpc.call('__probe__');
-  if (!proof.ok || !Object.values(proof.result).every(x => x === true)) throw Error('OS_ISOLATION');
+  requireOsProof(proof);
   report.os_isolation = proof.result;
   stage = 'local_receiver';
   server = http.createServer((req, res) => {
@@ -115,18 +117,17 @@ try {
   await client.start(); report.native_cli_version = (await client.getStatus()).version;
   if (report.native_cli_version !== '1.0.98') throw Error('CLI_PIN');
   stage = 'local_session_configuration';
-  session = await client.createSession({ model: 'offline-tool-stub', workingDirectory: '/tmp/home',
-    availableTools: NAMES, tools: toolset(rpc), onPermissionRequest: permission, hooks: hooks(),
-    skipCustomInstructions: true, sessionLimits: { maxAiCredits: 30 },
-    largeOutput: { enabled: false },
-    enableConfigDiscovery: false, mcpServers: {}, customAgents: [],
+  const prepared = await prepareReview(client, rpc, { model: 'offline-tool-stub', home: '/tmp/home',
     provider: { type: 'openai', baseUrl: env.COPILOT_PROVIDER_BASE_URL,
       wireApi: 'completions', apiKey: receiverNonce } });
-  const metadata = await session.rpc.metadata.snapshot();
+  session = prepared.session;
+  const metadata = prepared.metadata;
   if (metadata.sessionLimits?.maxAiCredits !== 30) throw Error('SESSION_LIMIT_UNPROVED');
   report.session_soft_credit_ceiling_verified = 30;
+  report.pre_dispatch_tool_catalog_verified = true;
+  if (report.mock_requests !== 0) throw Error('UNEXPECTED_PRE_DISPATCH_INFERENCE');
   stage = 'local_callback_transport';
-  const result = await session.sendAndWait({ prompt: 'OFFLINE TOOL CALLBACK FIXTURE. No real review or AI service.' }, 60000);
+  const result = await prepared.sendOnce('OFFLINE TOOL CALLBACK FIXTURE. No real review or AI service.', 60000);
   if (result?.data?.content !== 'OFFLINE_CALLBACK_PROOF_COMPLETE' || report.receiver_failed
       || report.mock_requests !== 6 || rpc.audit.length !== 5
       || rpc.audit.slice(0, 4).some(x => !x.ok) || rpc.audit[4].ok
@@ -136,7 +137,39 @@ try {
   report.transport = rpc.audit.map(({ tool, response_sha256, response_bytes, ok }) => ({ tool, response_sha256, response_bytes, ok }));
   report.exact_tool_results_received = true; report.host_escape_denied = true;
   report.local_receiver_authenticated = true; report.exact_tool_result_order_verified = true;
+  // Exercise the actual production stdin/SDK/broker/evidence entry, not only its factory.
+  // The alternate path only accepts a literal noncredential, synthetic snapshot and
+  // a kernel network-none namespace; it cannot contact the Copilot service.
+  const fixturePrompt = 'OFFLINE PRODUCTION ENTRY PROMPT FIXTURE';
+  const control = { version: 1, token: 'OFFLINE_NO_REAL_CREDENTIAL', model: 'offline-tool-stub',
+    prompt: fixturePrompt, prompt_sha256: digest(fixturePrompt), binding: { case: 'OFFLINE-FIXTURE' },
+    base: 'a'.repeat(40), head: 'b'.repeat(40), freeze_sha256: '0'.repeat(64),
+    snapshot_sha256: '0'.repeat(64), diff_sha256: '0'.repeat(64) };
+  const entry = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['/app/repo_wide_readonly/live-entry.mjs', '--offline-fixture'],
+      { shell: false, env: { PATH: process.env.PATH, HOME: '/tmp/home' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const chunks = []; let bytes = 0;
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(Error('PRODUCTION_ENTRY_TIMEOUT')); }, 25000);
+    child.stdout.on('data', b => { bytes += b.length; if (bytes > 8388608) child.kill('SIGKILL'); else chunks.push(b); });
+    child.stderr.on('data', () => {});
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('exit', code => {
+      clearTimeout(timer);
+      try { resolve({ code, proof: JSON.parse(Buffer.concat(chunks).toString()) }); }
+      catch { reject(Error('PRODUCTION_ENTRY_RECEIPT_INVALID')); }
+    });
+    child.stdin.end(JSON.stringify(control));
+  });
+  privateEntryDiagnostic = entry.proof;
+  if (entry.code !== 0 || entry.proof.status !== 'COMPLETED' || entry.proof.fixture_only !== true
+      || entry.proof.inference_dispatched !== false || entry.proof.real_model_requests !== 0
+      || entry.proof.initial_user_prompts !== 1 || entry.proof.offline_entry_transport?.status !== 'PASS'
+      || entry.proof.offline_entry_transport?.initial_prompt_sha256 !== control.prompt_sha256)
+    throw Error('PRODUCTION_ENTRY_MOCK_FAILED');
+  report.production_entry_mock_verified = true;
+  report.production_entry_proof = entry.proof.offline_entry_transport;
 } catch (error) {
+  report.status = 'BLOCKED';
   report.reason = 'NATIVE_OFFLINE_PROOF_FAILED'; report.failed_stage = stage;
   // Entire probe is credential-free/network-none and uses synthetic sources.
   // Never capture headers. Body nonce checks precede capture. Parent encrypts
@@ -146,7 +179,7 @@ try {
       error: String(error?.stack || error?.message || ''),
       stderr: String(client?.stderrBuffer || ''), received_payloads: privateTransport,
       callback_audit: rpc?.audit || [], receiver_failure_code: report.receiver_failure_code,
-      bootstrap_matrix: report.bootstrap_matrix });
+      bootstrap_matrix: report.bootstrap_matrix, production_entry: privateEntryDiagnostic });
     report.private_native_diagnostic = diagnostic.length <= 16777216
       ? diagnostic.split(receiverNonce).join('[LOCAL_NONCE_REDACTED]')
         .split(Buffer.from(receiverNonce).toString('base64')).join('[LOCAL_NONCE_REDACTED]')
