@@ -44,5 +44,6 @@
   "management_auth": "Standard existing gh credential; Keychain explicitly permitted by user clarification. Never a live Copilot credential relay.",
   "private_prompt_secret_provisioned": true,
   "public_recipient_secret_provisioned": true,
-  "budget_exception_scope": "Explicit 2026-10-29 owner decision for this new series only; no previous authorization or guard reset"
+  "budget_exception_scope": "Explicit 2026-10-29 owner decision for this new series only; no previous authorization or guard reset",
+  "input_transport_attestation": "cli-input-envelope-v1: canonical task/diff hash separate from actual wire hash; only exact canonical text or pinned current_datetime UTC envelope with byte-exact unchanged body, no fuzzy comparison"
 }

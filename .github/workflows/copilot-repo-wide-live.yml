@@ -138,6 +138,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node auth-preflight.mjs
+      - name: Verify the fixed private prompt secret before any reservation
+        env:
+          PYTHONPATH: tools/copilot-pilot
+          COPILOT_REPO_WIDE_PROMPT: ${{ secrets.COPILOT_REPO_WIDE_PROMPT }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from repo_wide_readonly.live_control import ROOT
+          expected = json.loads((ROOT / 'live-policy.json').read_text())['prompt_sha256']
+          actual = hashlib.sha256(os.environ['COPILOT_REPO_WIDE_PROMPT'].encode()).hexdigest()
+          if actual != expected:
+              raise SystemExit('PRIVATE_PROMPT_HASH_MISMATCH')
+          print('PINNED_PRIVATE_PROMPT_SECRET_HASH_PASS')
+          PY
   ledger-fixture:
     needs: offline
     runs-on: ubuntu-24.04

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { prepareReview, requireOsProof, OS_PROOF_FIELDS } from '../review-session.mjs';
+import { prepareReview, requireOsProof, OS_PROOF_FIELDS, promptTransport } from '../review-session.mjs';
 import { NAMES } from '../sdk-tools.mjs';
 
 function fixture(names = NAMES) {
@@ -56,4 +56,22 @@ test('OS proof must contain every mandatory field, all typed true', () => {
   assert.equal(requireOsProof({ ok: true, result }), result);
   for (const invalid of [{}, { nonroot: true }, { ...result, root_readonly: 1 }, { ...result, extra: true }])
     assert.throws(() => requireOsProof({ ok: true, result: invalid }), /OS_ISOLATION/);
+});
+test('strict pinned datetime envelope proves exact canonical body with separate hashes', () => {
+  const body = 'GENERIC\nSOURCE \\ and Unicode ł\n';
+  const stamp = '2026-10-29T16:30:05.553+00:00', now = Date.parse(stamp);
+  const wire = '<current_datetime>' + stamp + '</current_datetime>\n\n' + body;
+  const proof = promptTransport(wire, body, now);
+  assert.equal(proof.kind, 'copilot-1.0.98-current-datetime');
+  assert.equal(proof.canonical_sha256, promptTransport(body, body, now).canonical_sha256);
+  assert.notEqual(proof.wire_sha256, proof.canonical_sha256);
+});
+test('missing, stale, invalid or arbitrary envelope and body mutations fail without fuzzy matching', () => {
+  const body = 'SOURCE\n', stamp = '2026-10-29T16:30:05.553+00:00', now = Date.parse(stamp);
+  const prefix = '<current_datetime>' + stamp + '</current_datetime>\n\n';
+  for (const wire of ['extra' + prefix + body, prefix + body + ' ', prefix + body.slice(0, -1),
+    '<unknown>' + stamp + '</unknown>\n\n' + body,
+    prefix.replace('2026-10-29', '2026-02-31') + body, prefix.replace('+00:00', '+03:00') + body])
+    assert.equal(promptTransport(wire, body, now), null);
+  assert.equal(promptTransport(prefix + body, body, now + 300001), null);
 });

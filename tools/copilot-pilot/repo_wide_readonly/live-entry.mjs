@@ -10,7 +10,7 @@ import { networkInterfaces } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { BrokerRpc } from './sdk-tools.mjs';
 import { emptyClientOptions } from './client-options.mjs';
-import { prepareReview, requireOsProof } from './review-session.mjs';
+import { prepareReview, requireOsProof, promptTransport } from './review-session.mjs';
 import { NAMES } from './sdk-tools.mjs';
 import { completionFixture } from './mock-completions.mjs';
 
@@ -101,7 +101,9 @@ try {
           if (JSON.stringify(names) !== JSON.stringify([...NAMES].sort())) throw Error('CATALOG');
           const users = (body.messages || []).filter(m => m.role === 'user').flatMap(m => typeof m.content === 'string'
             ? [m.content] : (m.content || []).filter(x => x.type === 'text').map(x => x.text));
-          if (!users.includes(control.prompt)) throw Error('INITIAL_PROMPT_TRANSPORT');
+          const canonicalDeliveries = users.map(text => promptTransport(text, control.prompt)).filter(Boolean);
+          if (canonicalDeliveries.length !== 1) throw Error('INITIAL_PROMPT_TRANSPORT');
+          evidence.offline_prompt_delivery = canonicalDeliveries[0];
           const received = (body.messages || []).filter(m => m.role === 'tool').flatMap(m => typeof m.content === 'string'
             ? [m.content] : (m.content || []).filter(x => x.type === 'text').map(x => x.text));
           if (JSON.stringify(received) !== JSON.stringify(rpc.audit.map(x => JSON.stringify(x.response)))
@@ -144,6 +146,7 @@ try {
         || evidence.raw_output !== 'OFFLINE_CALLBACK_PROOF_COMPLETE') throw Error('ENTRY_TRANSPORT_INCOMPLETE');
     evidence.offline_entry_transport = { status: 'PASS', mock_requests: fixtureRequests,
       callback_count: rpc.audit.length, initial_prompt_sha256: control.prompt_sha256,
+      prompt_delivery: evidence.offline_prompt_delivery,
       exact_source_order_and_content: true, host_escape_denied: true };
   }
   checkpoint();
