@@ -21,7 +21,7 @@ OS_FIELDS = {'credential_env_absent', 'host_home_hidden', 'no_capabilities', 'no
 
 def require_transport(proof):
     flags = ['exact_tool_results_received', 'host_escape_denied', 'local_receiver_authenticated',
-             'exact_tool_result_order_verified', 'pre_dispatch_tool_catalog_verified']
+             'exact_tool_result_order_verified', 'pre_dispatch_tool_catalog_verified', 'production_entry_mock_verified']
     if (proof.get('status') != 'PASS' or proof.get('native_cli_version') != '1.0.98'
             or any(proof.get(k) is not True for k in flags)
             or any(type(proof.get(k)) is not int or proof[k] != v

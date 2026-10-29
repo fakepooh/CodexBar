@@ -81,9 +81,9 @@ class CIAndContextTests(unittest.TestCase):
                  'mock_requests': 6, 'callback_count': 5, 'selected_tools': ['repo_glob', 'repo_grep', 'repo_view'],
                  'os_isolation': {k: True for k in control.OS_FIELDS}}
         for key in ['exact_tool_results_received', 'host_escape_denied', 'local_receiver_authenticated',
-                    'exact_tool_result_order_verified', 'pre_dispatch_tool_catalog_verified']: proof[key] = True
+                    'exact_tool_result_order_verified', 'pre_dispatch_tool_catalog_verified', 'production_entry_mock_verified']: proof[key] = True
         self.assertTrue(control.require_transport(proof))
-        for key in ['pre_dispatch_tool_catalog_verified', 'os_isolation', 'callback_count']:
+        for key in ['pre_dispatch_tool_catalog_verified', 'production_entry_mock_verified', 'os_isolation', 'callback_count']:
             d = dict(proof); d.pop(key)
             with self.assertRaises(ValueError): control.require_transport(d)
         d = dict(proof, real_model_requests=True)
