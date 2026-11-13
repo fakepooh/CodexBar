@@ -189,6 +189,24 @@ jobs:
       - name: Provider plugin engine A/B goldens
         run: ./Scripts/test-plugin-engines.sh
 
+      - name: Package CLI for read-only acceptance checks
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -euo pipefail
+          swift build --product CodexBarCLI
+          bin_path="$(swift build --show-bin-path)"
+          tar -czf "$RUNNER_TEMP/macos-validation-cli.tar.gz" -C "$bin_path" \
+            CodexBarCLI CodexBar_CodexBarCore.bundle
+
+      - name: Upload validation CLI
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-validation-cli
+          path: ${{ runner.temp }}/macos-validation-cli.tar.gz
+          retention-days: 3
+          if-no-files-found: error
+
       - name: Verify checkout before publishing compiled cache
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: git diff --exit-code HEAD --

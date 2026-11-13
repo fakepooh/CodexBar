@@ -100,7 +100,10 @@ struct NotionMenuCardModelTests {
             ])]
         } ?? []
         let snapshot = UsageSnapshot(
-            primary: base.primary, secondary: base.secondary, details: sections, updatedAt: Self.now)
+            primary: base.primary,
+            secondary: base.secondary,
+            details: sections,
+            updatedAt: Self.now)
         let model = try Self.model(weeklyPace: nil, snapshot: snapshot)
         #expect(model.metrics.map(\.id) == ["primary", "secondary"])
         #expect(model.providerDetails.first?.title == (balance == nil ? nil : "Notion Credits"))
@@ -115,5 +118,51 @@ struct NotionMenuCardModelTests {
         #expect(restored.providerDetails.first?.rows.first?.value == balance)
         let refreshedWithoutCredits = try Self.model(weeklyPace: nil, snapshot: base, showOptional: true)
         #expect(refreshedWithoutCredits.providerDetails.isEmpty)
+    }
+
+    @Test
+    func `personal monthly labels and pace use the exact server duration even at the legacy sentinel`() throws {
+        let standard = RateWindow(
+            usedPercent: 20,
+            windowMinutes: 43200,
+            resetsAt: Self.periodEnd,
+            resetDescription: nil,
+            quotaLimit: 1500,
+            quotaUnit: "credits",
+            title: "Standard")
+        let select = RateWindow(
+            usedPercent: 0,
+            windowMinutes: 43200,
+            resetsAt: Self.periodEnd,
+            resetDescription: nil,
+            quotaLimit: 500,
+            quotaUnit: "credits",
+            title: "Select")
+        let snapshot = try UsageSnapshot(
+            primary: standard,
+            secondary: select,
+            details: [
+                ProviderDetailSection(title: "Personal credits", rows: [
+                    .init(label: "Standard remaining", value: "1,200 credits"),
+                    .init(label: "Select remaining", value: "500 credits"),
+                ]),
+                ProviderDetailSection(title: "Notion Credits", rows: [
+                    .init(label: "Remaining credits", value: "300"),
+                ]),
+            ], updatedAt: Self.now)
+        let model = try Self.model(weeklyPace: nil, snapshot: snapshot)
+        #expect(model.metrics.map(\.title) == ["Standard", "Select"])
+        // This server interval starts January 30. Inferring February would incorrectly yield 25%.
+        #expect(model.metrics.map(\.pacePercent) == [30, 30])
+        let labels = MenuBarLayoutLaneLabels(provider: .notion, snapshot: snapshot)
+        #expect(labels.primary == "Standard")
+        #expect(labels.secondary == "Select")
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .notion, snapshot: snapshot) == "300")
+        #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .notion, snapshot: snapshot) == nil)
+        let hidden = try Self.model(weeklyPace: nil, snapshot: snapshot, showOptional: false)
+        #expect(hidden.metrics.map(\.title) == model.metrics.map(\.title))
+        #expect(hidden.providerDetails.map(\.title) == ["Personal credits"])
+        #expect(MenuBarLayoutBalanceResolver.balance(
+            provider: .notion, snapshot: snapshot, showsOptionalCredits: false) == nil)
     }
 }
