@@ -248,8 +248,15 @@ public final class UserProviderPluginLoader: @unchecked Sendable {
     public static let sucraseVersion = "3.35.1"
 
     public static var defaultProvidersDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/codexbar/providers", isDirectory: true)
+        self.providersDirectory(
+            home: FileManager.default.homeDirectoryForCurrentUser,
+            isDeveloper: DeveloperStorage.isDeveloper)
+    }
+
+    static func providersDirectory(home: URL, isDeveloper: Bool) -> URL {
+        home.appendingPathComponent(
+            isDeveloper ? ".config/codexbar-developer/providers" : ".config/codexbar/providers",
+            isDirectory: true)
     }
 
     public static var defaultCacheDirectory: URL {

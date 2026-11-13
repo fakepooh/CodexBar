@@ -15,6 +15,15 @@ struct DeveloperStorageTests {
     }
 
     @Test
+    func `developer plugins use a separate writable directory`() {
+        let home = URL(fileURLWithPath: "/tmp/developer-fixture", isDirectory: true)
+        #expect(UserProviderPluginLoader.providersDirectory(home: home, isDeveloper: true).path
+            == "/tmp/developer-fixture/.config/codexbar-developer/providers")
+        #expect(UserProviderPluginLoader.providersDirectory(home: home, isDeveloper: false).path
+            == "/tmp/developer-fixture/.config/codexbar/providers")
+    }
+
+    @Test
     func `developer configuration uses a separate path and honors explicit overrides`() {
         let home = URL(fileURLWithPath: "/tmp/developer-fixture", isDirectory: true)
         let path = CodexBarConfigStore.defaultURL(home: home, environment: [:], isDeveloper: true)
