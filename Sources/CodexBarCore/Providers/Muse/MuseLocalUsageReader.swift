@@ -62,8 +62,8 @@ enum MuseLocalUsageReader {
             #endif
             self.defaultCacheRoot = environment["XDG_CACHE_HOME"].flatMap { $0.isEmpty ? nil : $0 }
                 .map { URL(fileURLWithPath: $0, isDirectory: true) }
-                .map { $0.appendingPathComponent("CodexBar", isDirectory: true) }
-                ?? defaultCache.appendingPathComponent("CodexBar", isDirectory: true)
+                .map { $0.appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true) }
+                ?? defaultCache.appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
         }
 
         init(sessionsRoot: URL) {

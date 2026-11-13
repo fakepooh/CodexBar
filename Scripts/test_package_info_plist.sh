@@ -19,6 +19,7 @@ PY
 
 APP="$TEMP_DIR/CodexBar.app"
 mkdir -p "$APP/Contents"
+APP_DISPLAY_NAME=CodexBar
 BUNDLE_ID=com.steipete.codexbar.test
 MARKETING_VERSION=0.0.0
 BUILD_NUMBER=0

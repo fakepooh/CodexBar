@@ -54,7 +54,8 @@ package struct KeychainStringStore: Sendable {
         logCategory: String,
         operations: Operations)
     {
-        self.context = KeychainPromptContext(kind: promptKind, service: "com.steipete.CodexBar", account: account)
+        let service = DeveloperStorage.isDeveloper ? "com.steipete.CodexBar.debug" : "com.steipete.CodexBar"
+        self.context = KeychainPromptContext(kind: promptKind, service: service, account: account)
         self.log = CodexBarLog.logger(logCategory)
         self.operations = operations
     }

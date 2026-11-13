@@ -464,7 +464,7 @@ public struct AntigravityOAuthCredentialsStore: @unchecked Sendable {
 
     public static func defaultDirectoryURL(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
         home
-            .appendingPathComponent(".codexbar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.dotDirectoryName, isDirectory: true)
             .appendingPathComponent("antigravity", isDirectory: true)
     }
 

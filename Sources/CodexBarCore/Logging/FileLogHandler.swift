@@ -8,7 +8,7 @@ final class FileLogSink: @unchecked Sendable {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library", isDirectory: true)
         return base
             .appendingPathComponent("Logs", isDirectory: true)
-            .appendingPathComponent("CodexBar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             .appendingPathComponent("CodexBar.log")
     }()
 

@@ -91,7 +91,7 @@ public enum ClaudeSwapRetainedUsageStore {
         if TestProcessSafety.isRunning { return nil }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         return base?
-            .appendingPathComponent("CodexBar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             .appendingPathComponent("claude-swap-retained-usage.json")
     }
 

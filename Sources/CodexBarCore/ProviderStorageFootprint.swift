@@ -305,6 +305,7 @@ public enum ProviderStoragePathCatalog {
             home.appendingPathComponent(relativePath, isDirectory: true).path
         }
 
+        let claudeProbePath = "Library/Application Support/\(DeveloperStorage.directoryName)/ClaudeProbe"
         let candidates: [String] = switch provider {
         case .codex:
             [CodexHomeScope.ambientHomeURL(env: environment, fileManager: fileManager).path] +
@@ -314,7 +315,7 @@ public enum ProviderStoragePathCatalog {
                 homePath(".claude"),
                 homePath(".config/claude"),
                 home
-                    .appendingPathComponent("Library/Application Support/CodexBar/ClaudeProbe", isDirectory: true)
+                    .appendingPathComponent(claudeProbePath, isDirectory: true)
                     .path,
             ]
         case .gemini:

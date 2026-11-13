@@ -224,7 +224,7 @@ public struct FileTokenAccountStore: ProviderTokenAccountStoring, @unchecked Sen
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
         return base
-            .appendingPathComponent("CodexBar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             .appendingPathComponent("token-accounts.json")
     }
 }

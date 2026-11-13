@@ -82,7 +82,7 @@ final class ClaudeOAuthPendingCacheClearUserDefaultsStore: ClaudeOAuthPendingCac
         domain: String,
         key: String,
         lockURL: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent(".codexbar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.dotDirectoryName, isDirectory: true)
             .appendingPathComponent("claude-oauth-cache.lock"))
     {
         self.domain = domain
