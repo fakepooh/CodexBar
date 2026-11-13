@@ -30,9 +30,15 @@ extension UsageStore {
                 browserDetection: browserDetection)
             do {
                 let usage = try await NotionProviderDescriptor.webStrategy(transport: transport).fetch(context).usage
-                let rolling = usage.primary?.usedPercent.description ?? "unavailable"
-                let monthly = usage.secondary?.usedPercent.description ?? "unavailable"
-                return "Notion plugin fetch succeeded\nRolling used: \(rolling)\nMonthly used: \(monthly)"
+                let descriptor = NotionProviderDescriptor.descriptor
+                let labels = descriptor.presentation.rateWindowLabels(metadata: descriptor.metadata, snapshot: usage)
+                let primary = usage.primary?.usedPercent.description ?? "unavailable"
+                let secondary = usage.secondary?.usedPercent.description ?? "unavailable"
+                return [
+                    "Notion plugin fetch succeeded",
+                    "\(labels.primary) used: \(primary)",
+                    "\(labels.secondary) used: \(secondary)",
+                ].joined(separator: "\n")
             } catch {
                 return "Notion plugin fetch failed: \(error.localizedDescription)"
             }

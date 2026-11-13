@@ -46,4 +46,29 @@ struct NotionDebugTests {
         #expect(await iterator.next() != nil)
         cancelled.finish()
     }
+
+    @Test
+    func `debug names migrated monthly pools without an optional credit lookup`() async {
+        let result = await UsageStore.debugNotionLog(
+            browserDetection: BrowserDetection(),
+            notionCookieSource: .manual,
+            notionCookieHeader: "token_v2=synthetic",
+            notionWorkspaceID: "space",
+            transport: ProviderHTTPTransportHandler { request in
+                let endpoint = request.url?.lastPathComponent
+                #expect(endpoint != "getAIUsageEligibilityV2")
+                let body = endpoint == "getSpaces"
+                    ? #"{"user":{"space":{"space":{"value":{"id":"space","name":"Fixture"}}}}}"#
+                    : #"""
+                    {"status":"not_applicable","allowances":[
+                      {"bucketId":"auto","cadence":"billing_period","state":"resolved","used":20,"limit":100},
+                      {"bucketId":"flex","cadence":"billing_period","state":"resolved","used":0,"limit":100}
+                    ]}
+                    """#
+                let url = try #require(request.url)
+                return try (Data(body.utf8), #require(HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
+            })
+        #expect(result == "Notion plugin fetch succeeded\nStandard used: 20.0\nSelect used: 0.0")
+    }
 }

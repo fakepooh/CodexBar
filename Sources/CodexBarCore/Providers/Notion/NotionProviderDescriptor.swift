@@ -6,6 +6,10 @@ public enum NotionProviderDescriptor {
     /// allowances and must not be paced as one.
     public static let rollingWindowMaxMinutes = 6 * 60
 
+    private static func isPersonalAllowance(_ window: RateWindow?) -> Bool {
+        window?.title == "Standard" || window?.title == "Select"
+    }
+
     public static let descriptor: ProviderDescriptor = Self.makeDescriptor()
 
     static func makeDescriptor() -> ProviderDescriptor {
@@ -63,16 +67,48 @@ public enum NotionProviderDescriptor {
             // The billing-period window renews on a calendar cycle, so pace has to measure the real
             // month ending at the reset rather than the 30-day sentinel the snapshot carries.
             pace: ProviderPaceCapability(
-                resetWindowPace: .windowDuration(minutes: ProviderPaceCapability.monthlyWindowSentinelMinutes),
-                inferredMonthlyDuration: .windowDuration(
-                    minutes: ProviderPaceCapability.monthlyWindowSentinelMinutes),
-                primary: .session(maximumMinutes: self.rollingWindowMaxMinutes),
+                resetWindowPace: .custom { window, _ in
+                    if Self.isPersonalAllowance(window) {
+                        return window.windowMinutes != nil && window.resetsAt != nil
+                    }
+                    return window.windowMinutes == ProviderPaceCapability.monthlyWindowSentinelMinutes
+                },
+                inferredMonthlyDuration: .custom { window in
+                    !Self.isPersonalAllowance(window)
+                        && window.windowMinutes == ProviderPaceCapability.monthlyWindowSentinelMinutes
+                },
+                primary: .init(kind: .session, windowRule: .custom { window, _ in
+                    guard !Self.isPersonalAllowance(window) else { return false }
+                    return window.windowMinutes.map { $0 <= Self.rollingWindowMaxMinutes } ?? true
+                }),
                 sessionPaceWindowRule: .custom { window, _ in
-                    guard let minutes = window.windowMinutes else { return false }
+                    guard !Self.isPersonalAllowance(window), let minutes = window.windowMinutes else { return false }
                     return minutes <= Self.rollingWindowMaxMinutes
                 }),
             presentation: ProviderUsagePresentation(
+                rateWindowLabeler: { metadata, snapshot, _ in
+                    let personal = Self.isPersonalAllowance(snapshot.primary) || Self
+                        .isPersonalAllowance(snapshot.secondary)
+                    return ProviderRateWindowLabels(
+                        primary: personal ? "Standard" : metadata.sessionLabel,
+                        secondary: personal ? "Select" : metadata.weeklyLabel,
+                        tertiary: metadata.opusLabel ?? "Sonnet",
+                        showsTertiary: metadata.supportsOpus)
+                },
+                iconWindowResolver: { context in
+                    let snapshot = context.snapshot
+                    guard Self.isPersonalAllowance(snapshot.primary) || Self.isPersonalAllowance(snapshot.secondary)
+                    else {
+                        return ProviderUsageWindowPair(primary: snapshot.primary, secondary: snapshot.secondary)
+                    }
+                    return ProviderUsageWindowPair(
+                        primary: snapshot.primary ?? snapshot.secondary,
+                        secondary: snapshot.primary == nil ? nil : snapshot.secondary)
+                },
                 semanticWindowResolver: { snapshot in
+                    if Self.isPersonalAllowance(snapshot.primary) || Self.isPersonalAllowance(snapshot.secondary) {
+                        return ProviderSemanticWindows(session: nil, weekly: snapshot.primary ?? snapshot.secondary)
+                    }
                     let rolling = snapshot.primary.flatMap { window -> RateWindow? in
                         guard !window.isSyntheticPlaceholder,
                               let minutes = window.windowMinutes,
@@ -88,6 +124,8 @@ public enum NotionProviderDescriptor {
                     }
                     return ProviderSemanticWindows(session: rolling, weekly: monthly)
                 },
+                // Semantic session tokens remain the legacy Rolling window; personal pools use named lanes.
+                menuBarLayoutPrimaryLabel: "Rolling",
                 menuBarLayoutSecondaryLabel: "Monthly",
                 menuBarBalanceDetailLabels: ["Remaining credits"],
                 legacyMenuBarShowsBalance: false,
