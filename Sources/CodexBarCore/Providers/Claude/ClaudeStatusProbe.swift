@@ -1422,7 +1422,7 @@ extension ClaudeStatusProbe {
         let fm = FileManager.default
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
         return base
-            .appendingPathComponent("CodexBar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             .appendingPathComponent("ClaudeProbe", isDirectory: true)
     }
 

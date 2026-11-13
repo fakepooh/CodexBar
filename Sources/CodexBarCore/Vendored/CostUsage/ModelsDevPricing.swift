@@ -545,7 +545,7 @@ enum ModelsDevCache {
 
     private static func defaultCacheRoot() -> URL {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        return root.appendingPathComponent("CodexBar", isDirectory: true)
+        return root.appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
     }
 
     static func cacheFileURL(cacheRoot: URL? = nil) -> URL {

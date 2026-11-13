@@ -512,7 +512,7 @@ public enum KeychainCacheStore {
     }
 
     private static var serviceName: String {
-        serviceOverride ?? self.cacheService
+        serviceOverride ?? (DeveloperStorage.isDeveloper ? "\(self.cacheService).debug" : self.cacheService)
     }
 
     private static var canUseRealKeychain: Bool {

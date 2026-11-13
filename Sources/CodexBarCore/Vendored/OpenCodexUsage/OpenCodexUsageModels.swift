@@ -156,7 +156,7 @@ public enum OpenCodexUsageLog {
     {
         let codexBarRoot = codexBarCachesDirectory
             ?? fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("CodexBar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             ?? AppGroupSupport.localFallbackDirectory(fileManager: fileManager)
         return codexBarRoot.appendingPathComponent("opencodex-usage", isDirectory: true)
     }

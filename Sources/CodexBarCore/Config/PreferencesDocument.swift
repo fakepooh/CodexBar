@@ -12,8 +12,14 @@ public struct PreferencesDocument: Codable, Sendable {
     }
 
     public static let pendingImportKey = "portablePreferencesPendingImport"
-    public static let importNotification = "com.steipete.codexbar.preferencesImport"
-    public static let defaultsDomain = "com.steipete.codexbar"
+    public static var importNotification: String {
+        "\(DeveloperStorage.bundleDirectoryName).preferencesImport"
+    }
+
+    public static var defaultsDomain: String {
+        DeveloperStorage.bundleDirectoryName
+    }
+
     private var version = 1
     private var preferences: [String: ProviderConfigExtensionValue] = [:]
 

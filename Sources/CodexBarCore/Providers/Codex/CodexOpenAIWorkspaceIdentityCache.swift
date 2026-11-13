@@ -91,7 +91,7 @@ public struct CodexOpenAIWorkspaceIdentityCache: @unchecked Sendable {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
         return base
-            .appendingPathComponent("CodexBar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             .appendingPathComponent("codex-openai-workspaces.json")
     }
 }

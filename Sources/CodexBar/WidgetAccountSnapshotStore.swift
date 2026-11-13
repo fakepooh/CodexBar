@@ -28,7 +28,7 @@ final class FileWidgetAccountSnapshotStore: WidgetAccountSnapshotStoring {
 
     init(url: URL? = nil) {
         self.url = url ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CodexBar/widget-account-snapshots.json")
+            .appendingPathComponent("\(DeveloperStorage.directoryName)/widget-account-snapshots.json")
     }
 
     func load() -> WidgetVerifiedTokenSnapshots {

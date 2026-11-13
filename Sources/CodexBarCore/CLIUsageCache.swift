@@ -67,7 +67,9 @@ public struct CLIUsageCache: Codable, Sendable {
     public static func defaultURL(fileManager: FileManager = .default) -> URL {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
-        return base.appendingPathComponent("CodexBar/CLIUsageCache/usage.json", isDirectory: false)
+        return base.appendingPathComponent(
+            "\(DeveloperStorage.directoryName)/CLIUsageCache/usage.json",
+            isDirectory: false)
     }
 
     /// Atomic write of a `0600` file inside a same-user `0700` directory (never a symlink).

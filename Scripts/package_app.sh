@@ -276,10 +276,12 @@ if [[ -f "$ICON_SOURCE" ]]; then
 fi
 
 BUNDLE_ID="com.steipete.codexbar"
+APP_DISPLAY_NAME="CodexBar"
 FEED_URL="https://raw.githubusercontent.com/steipete/CodexBar/main/appcast.xml"
 AUTO_CHECKS=true
 if [[ "$LOWER_CONF" == "debug" ]]; then
   BUNDLE_ID="com.steipete.codexbar.debug"
+  APP_DISPLAY_NAME="CodexBar Developer"
   FEED_URL=""
   AUTO_CHECKS=false
 fi
@@ -357,15 +359,15 @@ cat > "$WIDGET_ENTITLEMENTS" <<PLIST
 </plist>
 PLIST
 BUILD_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>CodexBar</string>
-    <key>CFBundleDisplayName</key><string>CodexBar</string>
+    <key>CFBundleName</key><string>${APP_DISPLAY_NAME}</string>
+    <key>CFBundleDisplayName</key><string>${APP_DISPLAY_NAME}</string>
     <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
     <key>CFBundleExecutable</key><string>CodexBar</string>
     <key>CFBundlePackageType</key><string>APPL</string>

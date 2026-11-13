@@ -1,0 +1,64 @@
+name: Build Developer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Select Xcode and install XcodeGen
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          [[ "$(uname -m)" == arm64 ]]
+          [[ "$(xcodebuild -version)" == Xcode\ 27* ]]
+          brew install xcodegen
+      - name: Build and verify
+        env:
+          ARCHES: arm64
+          CODEXBAR_SIGNING: adhoc
+        run: |
+          set -euo pipefail
+          ./Scripts/test_install_developer.sh
+          ./Scripts/package_app.sh debug
+          app=CodexBar.app
+          plist="$app/Contents/Info.plist"
+          [[ "$(lipo -archs "$app/Contents/MacOS/CodexBar")" == arm64 ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$plist")" == com.steipete.codexbar.debug ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$plist")" == 'CodexBar Developer' ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print CodexGitCommit' "$plist")" == "$GITHUB_SHA" ]]
+          [[ -z "$(/usr/libexec/PlistBuddy -c 'Print SUFeedURL' "$plist")" ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print SUEnableAutomaticChecks' "$plist")" == false ]]
+          test -x "$app/Contents/MacOS/CodexBar"
+          test -f "$app/Contents/Resources/Icon-classic.icns"
+          test -d "$app/Contents/Resources/KeyboardShortcuts_KeyboardShortcuts.bundle"
+          test -d "$app/Contents/Helpers/CodexBar_CodexBarCore.bundle"
+          codesign --verify --deep --strict "$app"
+          ./Scripts/verify_packaged_app_launch.sh "$app"
+      - name: Archive and verify
+        id: archive
+        run: |
+          set -euo pipefail
+          name="CodexBar-Developer-macos-arm64-${GITHUB_SHA:0:12}"
+          mkdir -p "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/extracted"
+          mv CodexBar.app 'CodexBar Developer.app'
+          ditto -c -k --sequesterRsrc --keepParent 'CodexBar Developer.app' "$RUNNER_TEMP/artifact/$name.zip"
+          (cd "$RUNNER_TEMP/artifact" && shasum -a 256 "$name.zip" > "$name.zip.sha256" && shasum -a 256 -c "$name.zip.sha256")
+          unzip -t "$RUNNER_TEMP/artifact/$name.zip"
+          ditto -x -k "$RUNNER_TEMP/artifact/$name.zip" "$RUNNER_TEMP/extracted"
+          codesign --verify --deep --strict "$RUNNER_TEMP/extracted/CodexBar Developer.app"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: ${{ runner.temp }}/artifact/*
+          retention-days: 7
+          if-no-files-found: error

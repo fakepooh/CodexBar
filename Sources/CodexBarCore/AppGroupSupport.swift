@@ -111,7 +111,7 @@ public enum AppGroupSupport {
     {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
-        let directory = base.appendingPathComponent("CodexBar", isDirectory: true)
+        let directory = base.appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }

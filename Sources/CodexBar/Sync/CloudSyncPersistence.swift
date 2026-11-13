@@ -154,7 +154,7 @@ struct CloudSyncPersistence: Sendable {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
         return base
-            .appendingPathComponent("com.steipete.codexbar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.bundleDirectoryName, isDirectory: true)
             .appendingPathComponent("sync", isDirectory: true)
             .appendingPathComponent("engine-state.json")
     }

@@ -314,7 +314,9 @@ public enum ProviderStoragePathCatalog {
                 homePath(".claude"),
                 homePath(".config/claude"),
                 home
-                    .appendingPathComponent("Library/Application Support/CodexBar/ClaudeProbe", isDirectory: true)
+                    .appendingPathComponent(
+                        "Library/Application Support/\(DeveloperStorage.directoryName)/ClaudeProbe",
+                        isDirectory: true)
                     .path,
             ]
         case .gemini:

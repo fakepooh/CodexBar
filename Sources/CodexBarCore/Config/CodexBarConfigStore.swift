@@ -127,13 +127,18 @@ public struct CodexBarConfigStore: @unchecked Sendable {
     public static func defaultURL(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default) -> URL
+        fileManager: FileManager = .default,
+        isDeveloper: Bool = DeveloperStorage.isDeveloper) -> URL
     {
         if let override = environment[pathEnvironmentKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty
         {
             let expanded = (override as NSString).expandingTildeInPath
             return URL(fileURLWithPath: expanded)
+        }
+
+        if isDeveloper {
+            return home.appendingPathComponent(".codexbar-developer/config.json")
         }
 
         if let xdgConfigHome = environment[xdgConfigHomeEnvironmentKey]?

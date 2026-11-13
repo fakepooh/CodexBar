@@ -174,7 +174,7 @@ public struct FileManagedCodexAccountStore: ManagedCodexAccountStoring, ManagedC
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
         let url = base
-            .appendingPathComponent("CodexBar", isDirectory: true)
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             .appendingPathComponent("managed-codex-accounts.json")
         if CodexCredentialFileAccess.isTestContext, !CodexCredentialFileAccess.permits(url) {
             return FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

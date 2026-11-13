@@ -88,7 +88,8 @@ public final class ProviderPluginApprovalStore: @unchecked Sendable {
 
     public static var defaultURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/CodexBar/plugin-approvals.json")
+            .appendingPathComponent(
+                "Library/Application Support/\(DeveloperStorage.directoryName)/plugin-approvals.json")
     }
 
     private let fileURL: URL
@@ -253,7 +254,7 @@ public final class UserProviderPluginLoader: @unchecked Sendable {
 
     public static var defaultCacheDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Caches/CodexBar/plugins", isDirectory: true)
+            .appendingPathComponent("Library/Caches/\(DeveloperStorage.directoryName)/plugins", isDirectory: true)
     }
 
     private let providersDirectory: URL
