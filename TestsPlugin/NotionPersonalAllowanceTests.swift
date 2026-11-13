@@ -334,8 +334,10 @@ struct NotionPersonalAllowanceTests {
                         body = usage
                     }
                 }
-                return try (Data(body.utf8), #require(HTTPURLResponse(
-                    url: #require(request.url), statusCode: 200, httpVersion: nil, headerFields: nil)))
+                let url = try #require(request.url)
+                let response = try #require(HTTPURLResponse(
+                    url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+                return (Data(body.utf8), response)
             })
         return try await runtime.fetchUsage(
             settings: ["WORKSPACE_ID": workspace, "OPTIONAL_USAGE": String(optional)],
