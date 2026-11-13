@@ -157,6 +157,8 @@ struct NotionMenuCardModelTests {
         let labels = MenuBarLayoutLaneLabels(provider: .notion, snapshot: snapshot)
         #expect(labels.primary == "Standard")
         #expect(labels.secondary == "Select")
+        #expect(MenuBarPercentWindowPreference.session.label(for: .notion, snapshot: snapshot) == "Rolling")
+        #expect(MenuBarLayoutSemanticWindowResolver.windows(provider: .notion, snapshot: snapshot).session == nil)
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .notion, snapshot: snapshot) == "300")
         #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .notion, snapshot: snapshot) == nil)
         let hidden = try Self.model(weeklyPace: nil, snapshot: snapshot, showOptional: false)

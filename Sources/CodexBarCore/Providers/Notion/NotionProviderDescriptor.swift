@@ -124,6 +124,8 @@ public enum NotionProviderDescriptor {
                     }
                     return ProviderSemanticWindows(session: rolling, weekly: monthly)
                 },
+                // Semantic session tokens remain the legacy Rolling window; personal pools use named lanes.
+                menuBarLayoutPrimaryLabel: "Rolling",
                 menuBarLayoutSecondaryLabel: "Monthly",
                 menuBarBalanceDetailLabels: ["Remaining credits"],
                 legacyMenuBarShowsBalance: false,
