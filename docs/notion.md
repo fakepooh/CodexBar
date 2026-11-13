@@ -32,7 +32,7 @@ provider error rather than an empty gauge.
 
 ### Automatic (recommended)
 
-1. Sign in to Notion in Chrome.
+1. Sign in to Notion in a supported browser.
 2. Enable **Notion AI** in **Settings → Providers**.
 
 The bundled Notion plugin runs on both engines. The host imports your browser session cookie automatically and sends
@@ -41,9 +41,9 @@ source domains rank as `app.notion.com`, `www.notion.com`, `notion.com`, `www.no
 The import requires the `token_v2` session cookie; a browser profile that has Notion cookies but no
 `token_v2` is skipped rather than used for a request that would fail with 401.
 
-**Note**: Automatic import defaults to Chrome only to avoid probing unrelated browser stores. Callers using
-the shared browser-cookie plumbing can still supply an explicit browser list. Chrome cookie decryption may
-require macOS Keychain approval.
+**Note**: Automatic import follows the shared supported-browser order. Background refreshes only read Chromium cookies when the no-UI Keychain preflight
+confirms existing access; they never request a new permission. Use an explicit Refresh to authorize cookie
+decryption when needed, or use Manual mode. An explicit refresh permits at most one browser permission retry.
 
 Validated sessions remain in the shared cookie cache. Background refreshes first reuse the existing owner-only
 `notion-session.json` token file, then the shared cache. If neither succeeds, browser reads remain subject to the shared
@@ -73,6 +73,12 @@ To capture the cookie manually:
 Accounts that belong to more than one workspace default to the first workspace on a Business or Enterprise
 plan. To pin a specific one, set **Workspace ID** in the provider settings, or `workspaceID` on the
 `notion` entry in `config.json`. Both dashed and undashed UUID forms are accepted.
+
+For accounts with many workspaces or members, discovery can exceed the plugin's 5 MiB response limit.
+If **Workspace ID** contains a valid UUID, CodexBar then requests allowances directly for that workspace.
+Email, account ID, workspace name, and plan are omitted for that refresh because discovery did not complete;
+normal-sized discovery still supplies them. Without a valid Workspace ID, the error asks you to configure one.
+The shared response limit remains unchanged, including for the allowance request.
 
 Notion does not support a standalone environment variable or a `--cookie` CLI flag for this provider. The
 only manual paths are the Settings fields above and `config.json`.
@@ -148,6 +154,10 @@ The debug probe reports only Rolling and Monthly. It disables optional usage and
 
 ### Pace
 
+The monthly card also shows a daily credit target from the reported remaining allowance and the local
+calendar days until reset, including today. This does not estimate credits consumed today; Notion does
+not report that breakdown. Hiding pace hides the target as well.
+
 Both bars carry an expected-usage estimate on the card and in `codexbar usage`, reading `n% in deficit`
 when you are ahead of an even burn and `n% in reserve` when behind.
 
@@ -179,3 +189,6 @@ components.
   cookie.
 - **"No Notion cookies found"** — the browser profile has no `token_v2` cookie for Notion. Sign in, or
   switch to a manual cookie.
+- **"Notion workspace discovery is too large"** — set **Workspace ID** to the UUID of the Business or
+  Enterprise workspace to monitor. You can find it in the `spaceId` body field of the
+  `getCreditRateLimitStatus` request described in the Manual setup instructions.

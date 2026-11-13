@@ -1,6 +1,8 @@
 import Foundation
 
 public struct WidgetSnapshot: Codable, Sendable {
+    static let selectedProviderKey = CodingUserInfoKey(rawValue: "CodexBar.widgetProvider")!
+
     public struct WidgetUsageRowSnapshot: Codable, Equatable, Sendable {
         public let id: String
         public let title: String
@@ -18,10 +20,10 @@ public struct WidgetSnapshot: Codable, Sendable {
     public struct ProviderEntry: Codable, Sendable {
         public let provider: ProviderInstanceID
         public let updatedAt: Date
-        public let primary: RateWindow?
-        public let secondary: RateWindow?
-        public let tertiary: RateWindow?
-        public let usageRows: [WidgetUsageRowSnapshot]?
+        public var primary: RateWindow?
+        public var secondary: RateWindow?
+        public var tertiary: RateWindow?
+        public var usageRows: [WidgetUsageRowSnapshot]?
         public let creditsRemaining: Double?
         public let codeReviewRemainingPercent: Double?
         public let tokenUsage: TokenUsageSummary?
@@ -29,21 +31,23 @@ public struct WidgetSnapshot: Codable, Sendable {
         public let providerCost: ProviderCostSnapshot?
         public let quotaOwnerKey: String?
         public let balanceText: String?
+        public let details: [ProviderDetailSection]?
 
         public init(
             instanceID: ProviderInstanceID,
             updatedAt: Date,
             primary: RateWindow?,
             secondary: RateWindow?,
-            tertiary: RateWindow?,
+            tertiary: RateWindow? = nil,
             usageRows: [WidgetUsageRowSnapshot]? = nil,
-            creditsRemaining: Double?,
-            codeReviewRemainingPercent: Double?,
-            tokenUsage: TokenUsageSummary?,
-            dailyUsage: [DailyUsagePoint],
+            creditsRemaining: Double? = nil,
+            codeReviewRemainingPercent: Double? = nil,
+            tokenUsage: TokenUsageSummary? = nil,
+            dailyUsage: [DailyUsagePoint] = [],
             providerCost: ProviderCostSnapshot? = nil,
             quotaOwnerKey: String? = nil,
-            balanceText: String? = nil)
+            balanceText: String? = nil,
+            details: [ProviderDetailSection]? = nil)
         {
             self.provider = instanceID
             self.updatedAt = updatedAt
@@ -58,6 +62,7 @@ public struct WidgetSnapshot: Codable, Sendable {
             self.providerCost = providerCost
             self.quotaOwnerKey = quotaOwnerKey
             self.balanceText = balanceText
+            self.details = details
         }
 
         public init(
@@ -65,15 +70,16 @@ public struct WidgetSnapshot: Codable, Sendable {
             updatedAt: Date,
             primary: RateWindow?,
             secondary: RateWindow?,
-            tertiary: RateWindow?,
+            tertiary: RateWindow? = nil,
             usageRows: [WidgetUsageRowSnapshot]? = nil,
-            creditsRemaining: Double?,
-            codeReviewRemainingPercent: Double?,
-            tokenUsage: TokenUsageSummary?,
-            dailyUsage: [DailyUsagePoint],
+            creditsRemaining: Double? = nil,
+            codeReviewRemainingPercent: Double? = nil,
+            tokenUsage: TokenUsageSummary? = nil,
+            dailyUsage: [DailyUsagePoint] = [],
             providerCost: ProviderCostSnapshot? = nil,
             quotaOwnerKey: String? = nil,
-            balanceText: String? = nil)
+            balanceText: String? = nil,
+            details: [ProviderDetailSection]? = nil)
         {
             self.init(
                 instanceID: provider.instanceID,
@@ -88,7 +94,8 @@ public struct WidgetSnapshot: Codable, Sendable {
                 dailyUsage: dailyUsage,
                 providerCost: providerCost,
                 quotaOwnerKey: quotaOwnerKey,
-                balanceText: balanceText)
+                balanceText: balanceText,
+                details: details)
         }
     }
 
@@ -120,9 +127,8 @@ public struct WidgetSnapshot: Codable, Sendable {
             self.sessionTokens = sessionTokens
             self.last30DaysCostUSD = last30DaysCostUSD
             self.last30DaysTokens = last30DaysTokens
-            self.currencyCode = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "USD"
-                : currencyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let currencyCode = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.currencyCode = currencyCode.isEmpty ? "USD" : currencyCode.uppercased()
             self.sessionLabel = sessionLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "Today"
                 : sessionLabel
@@ -136,17 +142,6 @@ public struct WidgetSnapshot: Codable, Sendable {
         public func isStale(comparedTo entryUpdatedAt: Date) -> Bool {
             guard let updatedAt else { return false }
             return entryUpdatedAt.timeIntervalSince(updatedAt) > Self.staleLagThreshold
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case sessionCostUSD
-            case sessionTokens
-            case last30DaysCostUSD
-            case last30DaysTokens
-            case currencyCode
-            case sessionLabel
-            case last30DaysLabel
-            case updatedAt
         }
 
         public init(from decoder: Decoder) throws {
@@ -175,21 +170,25 @@ public struct WidgetSnapshot: Codable, Sendable {
         }
     }
 
-    public let entries: [ProviderEntry]
+    public var entries: [ProviderEntry]
     public let accounts: [AccountEntry]
+    /// Counts only accounts omitted by the writer's per-provider snapshot cap; contains no identities.
+    public let accountOverflowCounts: [String: Int]
     public let enabledProviders: [ProviderInstanceID]
     public let usageBarsShowUsed: Bool
-    public let generatedAt: Date
+    public var generatedAt: Date
 
     public init(
         entries: [ProviderEntry],
         accounts: [AccountEntry] = [],
+        accountOverflowCounts: [String: Int] = [:],
         enabledProviders: [ProviderInstanceID]? = nil,
         usageBarsShowUsed: Bool = false,
         generatedAt: Date)
     {
         self.entries = entries
         self.accounts = accounts
+        self.accountOverflowCounts = accountOverflowCounts
         self.enabledProviders = enabledProviders ?? entries.map(\.provider)
         self.usageBarsShowUsed = usageBarsShowUsed
         self.generatedAt = generatedAt
@@ -198,18 +197,41 @@ public struct WidgetSnapshot: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case entries
         case accounts
+        case accountOverflowCounts
         case enabledProviders
         case usageBarsShowUsed
         case generatedAt
     }
 
+    private enum ProviderKey: String, CodingKey { case provider }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.entries = try container.decode([ProviderEntry].self, forKey: .entries)
+        let enabledProviders = try container.decodeIfPresent([ProviderInstanceID].self, forKey: .enabledProviders)
+        if let selectedProvider = decoder.userInfo[Self.selectedProviderKey] as? ProviderInstanceID {
+            var encodedEntries = try container.nestedUnkeyedContainer(forKey: .entries)
+            var entries: [ProviderEntry] = []
+            var providerIDs: [ProviderInstanceID] = []
+            while !encodedEntries.isAtEnd {
+                let entryDecoder = try encodedEntries.superDecoder()
+                let provider = try entryDecoder.container(keyedBy: ProviderKey.self)
+                    .decode(ProviderInstanceID.self, forKey: .provider)
+                if enabledProviders == nil { providerIDs.append(provider) }
+                if provider == selectedProvider {
+                    try entries.append(ProviderEntry(from: entryDecoder))
+                }
+            }
+            self.entries = entries
+            self.enabledProviders = enabledProviders ?? providerIDs
+        } else {
+            self.entries = try container.decode([ProviderEntry].self, forKey: .entries)
+            self.enabledProviders = enabledProviders ?? self.entries.map(\.provider)
+        }
+        // Keep all accounts: duplicate pin IDs must remain ambiguous even across providers.
         self.accounts = try container.decodeIfPresent([AccountEntry].self, forKey: .accounts) ?? []
+        self.accountOverflowCounts = try container
+            .decodeIfPresent([String: Int].self, forKey: .accountOverflowCounts) ?? [:]
         self.generatedAt = try container.decode(Date.self, forKey: .generatedAt)
-        self.enabledProviders = try container.decodeIfPresent([ProviderInstanceID].self, forKey: .enabledProviders)
-            ?? self.entries.map(\.provider)
         self.usageBarsShowUsed = try container.decodeIfPresent(Bool.self, forKey: .usageBarsShowUsed) ?? false
     }
 
@@ -218,6 +240,9 @@ public struct WidgetSnapshot: Codable, Sendable {
         try container.encode(self.entries, forKey: .entries)
         if !self.accounts.isEmpty {
             try container.encode(self.accounts, forKey: .accounts)
+        }
+        if !self.accountOverflowCounts.isEmpty {
+            try container.encode(self.accountOverflowCounts, forKey: .accountOverflowCounts)
         }
         try container.encode(self.enabledProviders, forKey: .enabledProviders)
         try container.encode(self.usageBarsShowUsed, forKey: .usageBarsShowUsed)
@@ -232,48 +257,46 @@ public enum WidgetSnapshotStore {
     @usableFromInline
     static let defaultSaveTimeout: TimeInterval = 10.0
 
-    private static let filename = AppGroupSupport.widgetSnapshotFilename
     private static let boundedIOExecutionLock = NSLock()
     private static let boundedIOStateLock = NSLock()
     private nonisolated(unsafe) static var boundedIOCircuitBreakerTripped = false
     private static let log = CodexBarLog.logger("widget-snapshot")
 
-    /// Access is synchronized by `lock`, so detached worker threads can safely publish a result.
-    private final class BoundedResultBox<Value: Sendable>: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value: Value?
-
-        func set(_ value: Value?) {
-            self.lock.lock()
-            self.value = value
-            self.lock.unlock()
-        }
-
-        func get() -> Value? {
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            return self.value
-        }
-    }
-
-    public static func load(bundleID: String? = Bundle.main.bundleIdentifier) -> WidgetSnapshot? {
+    public static func load(
+        bundleID: String? = Bundle.main.bundleIdentifier,
+        provider: UsageProvider? = nil) -> WidgetSnapshot?
+    {
         guard !TestProcessSafety.isRunning, !self.isBoundedIOCircuitBreakerTripped() else { return nil }
-        return self.load(from: self.snapshotURL(bundleID: bundleID))
+        return self.load(from: AppGroupSupport.snapshotURL(bundleID: bundleID), provider: provider)
     }
 
     public static func load(
         from url: URL,
-        timeout: TimeInterval = WidgetSnapshotStore.defaultLoadTimeout) -> WidgetSnapshot?
+        timeout: TimeInterval = WidgetSnapshotStore.defaultLoadTimeout,
+        provider: UsageProvider? = nil) -> WidgetSnapshot?
     {
-        guard let data: Data = self.performBounded(label: "load", timeout: timeout, operation: {
-            try? Data(contentsOf: url)
-        }) else { return nil }
-        return try? self.decoder.decode(WidgetSnapshot.self, from: data)
+        guard let data = self.loadData(from: url, timeout: timeout) else { return nil }
+        let decoder = self.decoder
+        decoder.userInfo[WidgetSnapshot.selectedProviderKey] = provider?.instanceID
+        return try? decoder.decode(WidgetSnapshot.self, from: data)
+    }
+
+    package static func loadData(
+        from url: URL?,
+        timeout: TimeInterval = WidgetSnapshotStore.defaultLoadTimeout) -> Data?
+    {
+        guard !self.isBoundedIOCircuitBreakerTripped(), url != nil || !TestProcessSafety.isRunning else { return nil }
+        let url = url ?? AppGroupSupport.snapshotURL()
+        return self.performBounded(label: "load", timeout: timeout) { try? Data(contentsOf: url) }
+    }
+
+    package static func encodedData(_ snapshot: WidgetSnapshot) throws -> Data {
+        try self.encoder.encode(snapshot)
     }
 
     public static func save(_ snapshot: WidgetSnapshot, bundleID: String? = Bundle.main.bundleIdentifier) {
         guard !TestProcessSafety.isRunning, !self.isBoundedIOCircuitBreakerTripped() else { return }
-        self.save(snapshot, to: self.snapshotURL(bundleID: bundleID))
+        self.save(snapshot, to: AppGroupSupport.snapshotURL(bundleID: bundleID))
     }
 
     public static func save(
@@ -282,17 +305,27 @@ public enum WidgetSnapshotStore {
         timeout: TimeInterval = WidgetSnapshotStore.defaultSaveTimeout)
     {
         guard !self.isBoundedIOCircuitBreakerTripped(),
-              let data = try? self.encoder.encode(snapshot)
+              let data = try? self.encodedData(snapshot)
         else { return }
+        self.save(data: data, to: url, timeout: timeout)
+    }
 
-        _ = self.performBounded(label: "save", timeout: timeout) {
+    @discardableResult
+    package static func save(
+        data: Data,
+        to url: URL?,
+        timeout: TimeInterval = WidgetSnapshotStore.defaultSaveTimeout) -> Bool
+    {
+        guard !self.isBoundedIOCircuitBreakerTripped(), url != nil || !TestProcessSafety.isRunning else { return false }
+        let url = url ?? AppGroupSupport.snapshotURL()
+        return self.performBounded(label: "save", timeout: timeout) {
             do {
                 try data.write(to: url, options: [.atomic])
                 return true
             } catch {
                 return nil
             }
-        }
+        } ?? false
     }
 
     static func _test_performBounded<T: Sendable>(
@@ -303,9 +336,7 @@ public enum WidgetSnapshotStore {
     }
 
     static func _test_resetBoundedIOState() {
-        self.boundedIOStateLock.lock()
-        self.boundedIOCircuitBreakerTripped = false
-        self.boundedIOStateLock.unlock()
+        self.boundedIOStateLock.withLock { self.boundedIOCircuitBreakerTripped = false }
     }
 
     private static func performBounded<T: Sendable>(
@@ -318,10 +349,11 @@ public enum WidgetSnapshotStore {
         defer { self.boundedIOExecutionLock.unlock() }
         guard !self.isBoundedIOCircuitBreakerTripped() else { return nil }
 
-        let result = BoundedResultBox<T>()
+        let result = CostUsageScanExecutor.LockedState<T?>(nil)
         let completion = DispatchSemaphore(value: 0)
         let thread = Thread {
-            result.set(operation())
+            let value = operation()
+            result.withLock { $0 = value }
             completion.signal()
         }
         thread.name = "CodexBar.widget-snapshot.\(label)"
@@ -331,13 +363,11 @@ public enum WidgetSnapshotStore {
             self.tripBoundedIOCircuitBreaker(label: label, timeout: timeout)
             return nil
         }
-        return result.get()
+        return result.withLock { $0 }
     }
 
     private static func isBoundedIOCircuitBreakerTripped() -> Bool {
-        self.boundedIOStateLock.lock()
-        defer { self.boundedIOStateLock.unlock() }
-        return self.boundedIOCircuitBreakerTripped
+        self.boundedIOStateLock.withLock { self.boundedIOCircuitBreakerTripped }
     }
 
     private static func tripBoundedIOCircuitBreaker(label: String, timeout: TimeInterval) {
@@ -352,10 +382,6 @@ public enum WidgetSnapshotStore {
             metadata: ["operation": label, "timeoutSeconds": String(timeout)])
     }
 
-    private static func snapshotURL(bundleID: String?) -> URL {
-        AppGroupSupport.snapshotURL(bundleID: bundleID)
-    }
-
     public static func appGroupID(for bundleID: String?) -> String? {
         AppGroupSupport.currentGroupID(for: bundleID)
     }
@@ -363,6 +389,7 @@ public enum WidgetSnapshotStore {
     private static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
         return encoder
     }
 

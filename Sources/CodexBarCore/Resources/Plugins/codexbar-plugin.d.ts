@@ -31,10 +31,15 @@ interface CodexBarSetting {
 }
 
 interface CodexBarRateWindow {
+  /** Optional label for generic cards and CLI text; trimmed, at most 256 UTF-8 bytes. */
+  title?: string | null;
   usedPercent: number;
   windowMinutes?: number | null;
   resetsAt?: Date | string | null;
   resetDescription?: string | null;
+  /** Absolute allowance; unit is credits, requests, or an ISO currency code. */
+  quotaLimit?: number | null;
+  quotaUnit?: string | null;
   nextRegenPercent?: number | null;
 }
 
@@ -88,8 +93,12 @@ interface CodexBarDetailRow {
   label: string;
   value: string;
   secondaryValue?: string | null;
+  /** Plugin-computed severity; does not change the consumed-progress convention. */
+  severity?: "normal" | "warning" | "critical" | null;
   /** Finite consumed fraction, from 0 through 1 inclusive. */
   progress?: number | null;
+  /** Finite expected consumed fraction from 0 through 1 inclusive; marks pace on the progress bar independently of severity. Ignored without progress. */
+  pace?: number | null;
   /** Finite raw usage, independent of the display string and progress. */
   usageValue?: number | null;
 }
@@ -107,6 +116,13 @@ interface CodexBarDetailSection {
   chart?: CodexBarDetailChart | null;
 }
 
+interface CodexBarMenuBarItem {
+  title: string;
+  iconProvider?: string | null;
+  /** Native extra-window ID. Missing/unmeasured references show unavailable, never another window. */
+  windowID?: string | null;
+}
+
 interface CodexBarUsageSnapshot {
   /** Explicitly declares a successful response with no displayable usage or identity. Other fields are still validated. */
   empty?: boolean;
@@ -119,6 +135,10 @@ interface CodexBarUsageSnapshot {
   /** Exact provider-reported daily spend. The host validates and sums every numeric row. */
   costUsage?: CodexBarCostUsageSnapshot | null;
   identity?: CodexBarIdentitySnapshot | null;
+  /** Built-in provider ID for the menu-bar/switcher logo only. Send only when ctx.env.supportsIconProvider === true. */
+  iconProvider?: string | null;
+  /** Up to 8 ordered logo/percentage pairs in one status item. Requires ctx.env.supportsMenuBarItems === true. */
+  menuBarItems?: CodexBarMenuBarItem[] | null;
   subscriptionRenewsAt?: Date | string | null;
   subscriptionExpiresAt?: Date | string | null;
   dataConfidence?: "exact" | "estimated" | "percentOnly" | "unknown";
@@ -131,6 +151,24 @@ interface CodexBarFetchResult {
   sourceLabel?: string;
   card?: {
     openAIAPIUsage: {
+      live?: {
+        windowMinutes: number;
+        startTime: number;
+        fetchedAt: number;
+        buckets: Array<{
+          startTime: number;
+          models: Array<{
+            name: string;
+            inputTokens: number;
+            cachedInputTokens: number;
+            outputTokens: number;
+            requests: number;
+            /** Batch API subsets of inputTokens + outputTokens / requests, excluded from rate-limit utilization. */
+            batchTokens?: number;
+            batchRequests?: number;
+          }>;
+        }>;
+      };
       historyDays: number;
       projectID?: string | null;
       daily: Array<{
@@ -261,6 +299,9 @@ interface CodexBarPluginContext {
   readonly fail: Readonly<CodexBarFailures>;
   readonly env: {
     readonly timeZone: string;
+    /** Older hosts omit this flag and reject the iconProvider snapshot field. */
+    readonly supportsIconProvider?: boolean;
+    readonly supportsMenuBarItems?: boolean;
   };
   readonly cache: {
     get<T = unknown>(key: string): T | undefined;
@@ -283,10 +324,13 @@ interface CodexBarPluginContext {
 interface CodexBarProviderDefinition {
   id: string;
   name: string;
-  icon?: { monogram?: string; tint?: string };
+  /** `svg`: optional monochrome SVG (≤ 8 KB, canvas ≤ 4096; see docs/plugins.md) shown as a template image; invalid SVG falls back to the monogram. */
+  icon?: { monogram?: string; tint?: string; svg?: string };
   /** Defaults to true: a switcher tab when Merge Icons is on. False keeps an appended card. */
   topLevel?: boolean;
   endpoints: CodexBarEndpoint[];
+  /** Optional approved browser link; a setting must be plain and resolve to a declared endpoint origin. */
+  dashboardURL?: string | { setting: string };
   auth?: CodexBarAuth;
   settings: CodexBarSetting[];
   /** Grants declared cookie access, HTTP status handling, or bounded non-secret persistent state. */

@@ -43,7 +43,7 @@ extension CostUsageScanner {
             priorityTurns: priorityTurns,
             pricingResolver: pricingResolver)
         guard includeBreakdowns else { return (daily, [], []) }
-        var latestSessions: [String: (usage: CostUsageFileUsage, report: CostUsageDailyReport)] = [:]
+        var latestSessions: [String: (usage: CostUsageFileUsage, report: CostUsageDailyReport, path: String)] = [:]
         let projectPathResolver = CodexCanonicalProjectPathResolver()
         var accumulatorsByProjectPath: [String: CodexProjectBreakdownAccumulator] = [:]
         for (filePath, usage) in cache.files {
@@ -51,6 +51,7 @@ extension CostUsageScanner {
                 sinceKey: range.scanSinceKey,
                 untilKey: range.scanUntilKey,
                 calendar: range.calendar)
+                || !Self.codexTurnPerformanceSamples(usage: usage, range: range).isEmpty
             else {
                 continue
             }
@@ -69,7 +70,7 @@ extension CostUsageScanner {
             if includeSession {
                 let id = usage.sessionId ?? URL(fileURLWithPath: filePath).deletingPathExtension().lastPathComponent
                 if !id.isEmpty, latestSessions[id].map({ $0.usage.mtimeUnixMs < usage.mtimeUnixMs }) ?? true {
-                    latestSessions[id] = (usage, report)
+                    latestSessions[id] = (usage, report, filePath)
                 }
             }
             guard includeProjects, !report.data.isEmpty else { continue }
@@ -77,10 +78,28 @@ extension CostUsageScanner {
                 ?? projectPathResolver.canonicalProjectPath(for: usage.projectPath)
                 ?? ""
             let sourceKey = usage.projectPath ?? ""
-            var accumulator = accumulatorsByProjectPath[projectKey] ?? CodexProjectBreakdownAccumulator()
-            accumulator.files[filePath] = usage
-            accumulator.reportsBySourcePath[sourceKey, default: []].append(report)
-            accumulatorsByProjectPath[projectKey] = accumulator
+            #if DEBUG
+            let previousStorage: UInt? = if CostUsageStoreTestHooks.current.projectSourceReportStorageChanged != nil {
+                accumulatorsByProjectPath[projectKey]?.reportsBySourcePath[sourceKey]?.withUnsafeBufferPointer {
+                    UInt(bitPattern: $0.baseAddress)
+                }
+            } else {
+                nil
+            }
+            #endif
+            accumulatorsByProjectPath[projectKey, default: .init()].files[filePath] = usage
+            accumulatorsByProjectPath[projectKey, default: .init()]
+                .reportsBySourcePath[sourceKey, default: []].append(report)
+            #if DEBUG
+            if let previousStorage,
+               let observer = CostUsageStoreTestHooks.current.projectSourceReportStorageChanged,
+               let currentStorage = accumulatorsByProjectPath[projectKey]?
+                   .reportsBySourcePath[sourceKey]?.withUnsafeBufferPointer({ UInt(bitPattern: $0.baseAddress) }),
+                   previousStorage != currentStorage
+            {
+                observer()
+            }
+            #endif
         }
 
         let projects = accumulatorsByProjectPath.map { projectPath, accumulator in
@@ -113,10 +132,20 @@ extension CostUsageScanner {
             }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
+        let databaseURL = CostUsageStore.databaseURL(cacheRoot: modelsDevCacheRoot)
         let sessions = latestSessions.compactMap { id, file -> CostUsageSessionBreakdown? in
-            guard !file.report.data.isEmpty else { return nil }
+            let performanceSamples = Self.codexTurnPerformanceSamples(usage: file.usage, range: range)
+            // A turn can complete after midnight with all billed requests on the previous day.
+            guard !file.report.data.isEmpty || !performanceSamples.isEmpty else { return nil }
             return Self.codexSessionBreakdown(
-                sessionID: id, usage: file.usage, report: file.report, projectPathResolver: projectPathResolver)
+                detailSource: CostUsageSessionDetailSource(
+                    databaseURL: databaseURL,
+                    sessionSource: SessionToolActivitySource(fileURL: URL(fileURLWithPath: file.path), sessionID: id),
+                    parsedBytes: file.usage.parsedBytes),
+                usage: file.usage,
+                report: file.report,
+                projectPathResolver: projectPathResolver,
+                performanceSamples: performanceSamples)
         }
         .sorted { lhs, rhs in
             if lhs.lastActivity != rhs.lastActivity {
@@ -128,29 +157,35 @@ extension CostUsageScanner {
     }
 
     private static func codexSessionBreakdown(
-        sessionID: String,
+        detailSource: CostUsageSessionDetailSource,
         usage: CostUsageFileUsage,
         report: CostUsageDailyReport,
-        projectPathResolver: CodexCanonicalProjectPathResolver) -> CostUsageSessionBreakdown
+        projectPathResolver: CodexCanonicalProjectPathResolver,
+        performanceSamples: [CostUsageTurnPerformanceSample]) -> CostUsageSessionBreakdown
     {
+        let source = detailSource.sessionSource
         let summary = report.summary
         let requestCounts = report.data.compactMap(\.requestCount)
         let resolvedProjectPath = usage.canonicalProjectPath
             ?? projectPathResolver.canonicalProjectPath(for: usage.projectPath)
         let projectPath = resolvedProjectPath?.isEmpty == false ? resolvedProjectPath : nil
         var session = CostUsageSessionBreakdown(
-            sessionID: sessionID,
+            sessionID: source.sessionID,
             lastActivity: Date(timeIntervalSince1970: TimeInterval(usage.mtimeUnixMs) / 1000),
             inputTokens: summary?.totalInputTokens,
             cachedInputTokens: summary?.cacheReadTokens,
             outputTokens: summary?.totalOutputTokens,
+            reasoningTokens: summary?.reasoningTokens,
             totalTokens: summary?.totalTokens,
             requestCount: requestCounts.isEmpty ? nil : requestCounts.reduce(0, +),
             costUSD: summary?.totalCostUSD,
             modelBreakdowns: Self.codexProjectModelBreakdowns(from: report.data) ?? [],
             projectPath: projectPath,
             projectName: projectPath.map { Self.codexProjectName(path: $0) },
-            title: usage.codexSession?.title)
+            title: usage.codexSession?.title,
+            turnPerformanceSamples: performanceSamples,
+            toolActivitySource: source,
+            requestDetailSource: detailSource)
         session.workingDirectory = usage.projectPath
         return session
     }

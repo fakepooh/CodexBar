@@ -19,12 +19,34 @@ struct SwitcherExhaustedQuotaTests {
     }
 
     @Test(arguments: [false, true])
-    func `healthy monthly allowance keeps weekly progress`(_ showUsed: Bool) {
+    func `automatic switcher shows the most constrained healthy allowance`(_ showUsed: Bool) {
+        let cases: [(Double, Double?, Double, Int)] = [
+            (20, 40, 90, 43200), (20, nil, 90, 43200), (90, 40, 30, 300), (20, 90, 30, 10080),
+        ]
+        for (rolling, weekly, monthly, minutes) in cases {
+            let snapshot = Self.snapshot(rolling: rolling, weekly: weekly, monthly: monthly)
+            let percent = StatusItemController.switcherWeeklyMetricPercent(
+                for: .opencodego,
+                snapshot: snapshot,
+                showUsed: showUsed)
+            #expect(percent == (showUsed ? 90 : 10))
+            let metric = MenuBarMetricWindowResolver.rateWindow(
+                preference: .automatic,
+                provider: .opencodego,
+                snapshot: snapshot,
+                supportsAverage: false)
+            #expect(metric?.usedPercent == 90)
+            #expect(metric?.windowMinutes == minutes)
+        }
+    }
+
+    @Test
+    func `automatic switcher preserves weekly progress when weekly is most constrained`() {
         let percent = StatusItemController.switcherWeeklyMetricPercent(
             for: .opencodego,
-            snapshot: Self.snapshot(monthly: 90),
-            showUsed: showUsed)
-        #expect(percent == (showUsed ? 40 : 60))
+            snapshot: Self.snapshot(monthly: 30),
+            showUsed: false)
+        #expect(percent == 60)
     }
 
     @Test(arguments: [MenuBarMetricPreference.primary, .secondary, .tertiary])
@@ -54,7 +76,7 @@ struct SwitcherExhaustedQuotaTests {
         #expect(view._test_quotaIndicatorFillRatios().last == 0)
         #expect(view._test_quotaIndicatorFillFrames().last?.width == 0)
 
-        snapshot = Self.snapshot(monthly: 90)
+        snapshot = Self.snapshot(monthly: 30)
         view.updateQuotaIndicators()
         view.layoutSubtreeIfNeeded()
         #expect(view._test_quotaIndicatorFillRatios().last == 0.6)
@@ -63,18 +85,18 @@ struct SwitcherExhaustedQuotaTests {
 
     @MainActor
     @Test
-    func `render synthetic exhausted quota switcher`() throws {
+    func `render synthetic constrained quota switcher`() throws {
         guard let output = ProcessInfo.processInfo.environment["CODEXBAR_SWITCHER_QUOTA_PROOF_PATH"] else { return }
-        let snapshot = Self.snapshot(monthly: 100)
+        let snapshot = Self.snapshot(monthly: 90)
         let view = Self.switcher(snapshot: { snapshot })
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 150))
         container.appearance = NSAppearance(named: .aqua)
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor.white.cgColor
-        let title = NSTextField(labelWithString: "OpenCode Go — monthly quota exhausted")
+        let title = NSTextField(labelWithString: "OpenCode Go — monthly quota is tightest")
         title.font = .systemFont(ofSize: 15, weight: .semibold)
         title.frame = NSRect(x: 20, y: 111, width: 380, height: 22)
-        let detail = NSTextField(labelWithString: "Used: rolling 20% · weekly 40% · monthly 100%")
+        let detail = NSTextField(labelWithString: "Used: rolling 20% · weekly 40% · monthly 90%")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
         detail.frame = NSRect(x: 20, y: 83, width: 380, height: 20)
@@ -132,7 +154,7 @@ struct SwitcherExhaustedQuotaTests {
             weeklyRemainingProvider: { provider in
                 provider == .opencodego
                     ? StatusItemController.switcherWeeklyMetricPercent(
-                        for: provider,
+                        for: .opencodego,
                         snapshot: snapshot(),
                         showUsed: false)
                     : 60

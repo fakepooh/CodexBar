@@ -48,7 +48,7 @@ enum ProviderPluginSnapshotMapper {
             value,
             allowed: [
                 "primary", "secondary", "tertiary", "extraWindows", "cost", "costUsage", "details",
-                "identity",
+                "identity", "iconProvider", "menuBarItems",
                 "subscriptionRenewsAt", "subscriptionExpiresAt", "dataConfidence", "empty",
             ],
             path: "usage")
@@ -61,6 +61,8 @@ enum ProviderPluginSnapshotMapper {
         let costUsage = try self.costUsage(value)
         let details = try self.details(value)
         let identity = try self.identity(value, provider: provider)
+        let iconProvider = try self.iconProvider(value)
+        let menuBarItems = try self.menuBarItems(value)
         let subscriptionRenewsAt = try self.optionalDate(value, property: "subscriptionRenewsAt")
         let subscriptionExpiresAt = try self.optionalDate(value, property: "subscriptionExpiresAt")
         let dataConfidence = try self.dataConfidence(value)
@@ -88,11 +90,38 @@ enum ProviderPluginSnapshotMapper {
             providerCost: providerCost,
             costUsage: costUsage,
             details: details,
+            iconProvider: iconProvider,
+            menuBarItems: menuBarItems,
             subscriptionExpiresAt: subscriptionExpiresAt,
             subscriptionRenewsAt: subscriptionRenewsAt,
             updatedAt: now,
             identity: identity,
             dataConfidence: dataConfidence)
+    }
+
+    private static func iconProvider(_ root: any ProviderPluginValue) throws -> UsageProvider? {
+        guard let value = root.property("iconProvider"), !value.isUndefined, !value.isNull else { return nil }
+        guard value.isString, let provider = UsageProvider(rawValue: value.stringValue()) else {
+            throw ProviderPluginError.invalidSnapshot("iconProvider must be a built-in provider ID")
+        }
+        return provider
+    }
+
+    private static func menuBarItems(_ root: any ProviderPluginValue) throws -> [ProviderMenuBarItem] {
+        guard let value = root.property("menuBarItems"), !value.isUndefined, !value.isNull else { return [] }
+        guard value.isArray else { throw ProviderPluginError.invalidSnapshot("menuBarItems must be an array") }
+        let count = try self.boundedArrayCount(value, maximum: ProviderMenuBarItem.maximumItems, path: "menuBarItems")
+        return try (0..<count).map { index in
+            let path = "menuBarItems[\(index)]"
+            guard let item = value.element(at: index), item.isObject, !item.isArray else {
+                throw ProviderPluginError.invalidSnapshot("\(path) must be an object")
+            }
+            try self.object(item, allowed: ["title", "iconProvider", "windowID"], path: path)
+            return try ProviderMenuBarItem(
+                title: self.requiredDetailString(item, property: "title", path: path),
+                iconProvider: self.iconProvider(item),
+                windowID: self.optionalDetailString(item, property: "windowID", path: path))
+        }
     }
 
     private static func hasMeaningfulIdentity(_ identity: ProviderIdentitySnapshot?) -> Bool {
@@ -144,6 +173,7 @@ enum ProviderPluginSnapshotMapper {
                     value: self.requiredDetailString(row, property: "value", path: rowPath),
                     secondaryValue: self.optionalDetailString(row, property: "secondaryValue", path: rowPath),
                     progress: self.detailProgress(row, path: rowPath),
+                    severity: self.detailSeverity(row, path: rowPath),
                     usageValue: self.optionalFiniteNumber(row, property: "usageValue", path: rowPath))
             }
             let chart = try self.detailChart(section, path: path)
@@ -151,15 +181,32 @@ enum ProviderPluginSnapshotMapper {
         }
     }
 
+    private static func detailSeverity(
+        _ row: any ProviderPluginValue,
+        path: String) throws -> ProviderDetailSection.Row.Severity?
+    {
+        guard let value = row.property("severity"), !value.isUndefined, !value.isNull else { return nil }
+        guard value.isString, let severity = ProviderDetailSection.Row.Severity(rawValue: value.stringValue()) else {
+            throw ProviderPluginError.invalidSnapshot("\(path).severity must be normal, warning, or critical")
+        }
+        return severity
+    }
+
     private static func detailProgress(
         _ row: any ProviderPluginValue,
         path: String) throws -> ProviderDetailSection.Row.Progress?
     {
+        // Pace is validated even without progress so a malformed field never passes silently;
+        // without progress there is no bar to mark, so it is then dropped.
+        let pace = try self.optionalFiniteNumber(row, property: "pace", path: path)
+        if let pace, !(0...1).contains(pace) {
+            throw ProviderPluginError.invalidSnapshot("\(path).pace must be between 0 and 1")
+        }
         guard let fraction = try self.optionalFiniteNumber(row, property: "progress", path: path) else { return nil }
         guard (0...1).contains(fraction) else {
             throw ProviderPluginError.invalidSnapshot("\(path).progress must be between 0 and 1")
         }
-        return try ProviderDetailSection.Row.Progress(used: fraction, total: 1)
+        return try ProviderDetailSection.Row.Progress(used: fraction, total: 1, expectedUsed: pace)
     }
 
     private static func detailChart(
@@ -250,12 +297,19 @@ enum ProviderPluginSnapshotMapper {
         let resetsAt = try self.optionalDate(value, property: "resetsAt", path: path)
         let resetDescription = try self.optionalString(value, property: "resetDescription", path: path)
         let nextRegenPercent = try self.optionalFiniteNumber(value, property: "nextRegenPercent", path: path)
-        return RateWindow(
+        let quotaLimit = try self.optionalFiniteNumber(value, property: "quotaLimit", path: path)
+        if let quotaLimit, quotaLimit <= 0 {
+            throw ProviderPluginError.invalidSnapshot("\(path).quotaLimit must be positive")
+        }
+        return try RateWindow(
             usedPercent: usedPercent,
             windowMinutes: windowMinutes,
             resetsAt: resetsAt,
             resetDescription: resetDescription,
-            nextRegenPercent: nextRegenPercent.map { min(100, max(0, $0)) })
+            quotaLimit: quotaLimit,
+            quotaUnit: self.optionalString(value, property: "quotaUnit", path: path),
+            nextRegenPercent: nextRegenPercent.map { min(100, max(0, $0)) },
+            title: self.optionalString(value, property: "title", path: path))
     }
 
     private static func extraWindows(

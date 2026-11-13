@@ -236,7 +236,11 @@ extension CostUsageStoreReadWorkTests {
             completedCurrentWindowRootPaths: roots,
             completedCurrentWindowFlatRootPaths: roots,
             cacheWideMigrationQueueActive: metadataOnlyPending ? nil : true)
-        CostUsageStoreAccess.replace(cacheRoot: fixture.env.cacheRoot, cache: cache, calendar: fixture.calendar)
+        CostUsageStoreAccess.replace(
+            cacheRoot: fixture.env.cacheRoot,
+            home: fixture.env.codexStoreHome,
+            cache: cache,
+            calendar: fixture.calendar)
 
         let status = await CostUsageFetcher(scannerOptions: fixture.options).codexScanCatchUpStatus()
         let cached = try #require(await fixture.cachedSnapshot())
@@ -356,10 +360,14 @@ extension CostUsageStoreReadWorkTests {
 
 extension ReadWorkFixture {
     /// The pre-projection full-load path, including the fetcher's existing merge normalization.
+    /// Full details are complete only when this fixture's scan is complete.
     func fullCachedSnapshot(cache: CostUsageCache? = nil) -> CostUsageTokenSnapshot {
         let roots = CostUsageScanner.codexSessionsRoots(options: self.options)
         let full = CostUsageScanner.codexCache(
-            cache ?? CostUsageStoreAccess.read(cacheRoot: self.env.cacheRoot, calendar: self.calendar), scopedTo: roots)
+            cache ?? CostUsageStoreAccess.read(
+                cacheRoot: self.env.cacheRoot,
+                home: self.env.codexStoreHome,
+                calendar: self.calendar), scopedTo: roots)
         return CostUsageFetcher.tokenSnapshot(
             from: .merged([self.fullReport(full)]),
             now: self.now,
@@ -372,6 +380,7 @@ extension ReadWorkFixture {
                     cache: full, range: self.range, modelsDevCacheRoot: self.env.cacheRoot)),
             sessions: CostUsageScanner.buildCodexSessionBreakdownsFromCache(
                 cache: full, range: self.range, modelsDevCacheRoot: self.env.cacheRoot, sessionRoots: roots),
+            detailsAreComplete: !self.incomplete,
             updatedAt: self.now)
     }
 

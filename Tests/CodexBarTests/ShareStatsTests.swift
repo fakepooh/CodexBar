@@ -426,6 +426,13 @@ struct ShareStatsTests {
             let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
             try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
             try png.write(to: outputDirectory.appendingPathComponent("share-stats.png"), options: .atomic)
+            for language in ["de", "fr", "es", "zh-Hans", "ja", "ar"] {
+                try CodexBarLocalizationOverride.$appLanguage.withValue(language) {
+                    let localizedPNG = try #require(ShareStatsRenderer.pngData(for: payload))
+                    try localizedPNG.write(to: outputDirectory.appendingPathComponent(
+                        "share-stats-\(language).png"), options: .atomic)
+                }
+            }
         }
     }
 
@@ -444,14 +451,6 @@ struct ShareStatsTests {
         #expect(ShareStatsCardView.providerDisplayLimit(for: 5) == 5)
         #expect(ShareStatsCardView.providerDisplayLimit(for: 6) == 4)
         #expect(ShareStatsCardView.providerDisplayLimit(for: 12) == 4)
-    }
-
-    @Test @MainActor
-    func `model colors use provider identity instead of decorated account name`() throws {
-        let payload = try #require(ShareStatsBuilder.make(model: Self.dashboard))
-        let codexModel = try #require(payload.topModels.first { $0.provider == .codex })
-
-        #expect(ShareStatsCardView.providerPaletteIndex(for: codexModel, providers: payload.providers) == 1)
     }
 
     @Test

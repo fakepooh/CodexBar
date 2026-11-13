@@ -22,10 +22,13 @@ public struct ProviderPluginSetting: Equatable, Sendable {
 public struct ProviderPluginIcon: Equatable, Sendable {
     public let monogram: String
     public let tint: String
+    /// A validated monochrome SVG, rendered as a template image. Nil means the monogram is shown.
+    public let svg: String?
 
-    public init(monogram: String, tint: String) {
+    public init(monogram: String, tint: String, svg: String? = nil) {
         self.monogram = monogram
         self.tint = tint
+        self.svg = svg.flatMap { ProviderPluginIconSVG.isValid($0) ? $0 : nil }
     }
 }
 
@@ -76,6 +79,11 @@ public enum ProviderPluginPercentPolicy: String, Sendable {
     }
 }
 
+enum ProviderPluginDashboardLink: Sendable {
+    case fixed(String)
+    case setting(String)
+}
+
 public struct ProviderPluginManifest: Sendable {
     public let id: ProviderInstanceID
     public let name: String
@@ -86,6 +94,7 @@ public struct ProviderPluginManifest: Sendable {
     public let settings: [ProviderPluginSetting]
     public let capabilities: Set<ProviderPluginCapability>
     public let cookieDomains: Set<String>
+    let dashboardLink: ProviderPluginDashboardLink?
     public let percentPolicy: ProviderPluginPercentPolicy
     public let cookiePolicy: ProviderPluginCookiePolicy?
     public var usesCookieJar: Bool {
@@ -222,6 +231,22 @@ public struct ProviderPluginManifest: Sendable {
             }
         }
         self.settings = settings
+        if let dashboard = definition.property("dashboardURL"), !dashboard.isUndefined, !dashboard.isNull {
+            if dashboard.isString {
+                let raw = try Self.optionalBoundedString(definition, property: "dashboardURL", maximumLength: 2048)
+                if let raw { _ = try Self.validatedDashboardURL(raw) }
+                self.dashboardLink = raw.map(ProviderPluginDashboardLink.fixed)
+            } else {
+                let key = try Self.requiredString(dashboard, property: "setting")
+                guard settings.first(where: { $0.key == key })?.kind == .plain else {
+                    throw ProviderPluginError.invalidManifest(
+                        "endpoint setting '\(key)' must be declared as a plain setting")
+                }
+                self.dashboardLink = .setting(key)
+            }
+        } else {
+            self.dashboardLink = nil
+        }
 
         if let authValue = definition.property("auth"), !authValue.isUndefined, !authValue.isNull {
             guard authValue.isObject else {
@@ -420,7 +445,9 @@ public struct ProviderPluginManifest: Sendable {
         else {
             throw ProviderPluginError.invalidManifest("icon tint must be a #RRGGBB color")
         }
-        return ProviderPluginIcon(monogram: monogram, tint: tint.uppercased())
+        // An SVG that fails validation is dropped rather than failing the plugin: the monogram is the fallback.
+        let svg = try Self.optionalString(value, property: "svg")
+        return ProviderPluginIcon(monogram: monogram, tint: tint.uppercased(), svg: svg)
     }
 
     private static func normalizedCookieDomain(_ rawValue: String) throws -> String {
@@ -466,11 +493,7 @@ enum ProviderPluginOrigin {
         return "https://\(self.formattedHost(host))\(port == nil || port == 443 ? "" : ":\(port!)")"
     }
 
-    static func normalizedOrigin(of url: URL) throws -> String {
-        try self.normalizedOrigin(of: url, policy: .https)
-    }
-
-    static func normalizedOrigin(of url: URL, policy: ProviderPluginEndpoint.Policy) throws -> String {
+    static func normalizedOrigin(of url: URL, policy: ProviderPluginEndpoint.Policy = .https) throws -> String {
         let validator = ProviderEndpointOverrideValidator()
         let validated: URL? = switch policy {
         case .https:
@@ -499,6 +522,7 @@ enum ProviderPluginOrigin {
 public enum ProviderPluginError: LocalizedError, Sendable, Equatable {
     case load(String)
     case invalidManifest(String)
+    case endpointNotConfigured(plugin: String, setting: String)
     case networkPolicy(String)
     case http(String)
     case secretAccess(String)
@@ -510,6 +534,8 @@ public enum ProviderPluginError: LocalizedError, Sendable, Equatable {
         switch self {
         case let .load(message): "Provider plugin load failed: \(message)"
         case let .invalidManifest(message): "Invalid provider plugin manifest: \(message)"
+        case let .endpointNotConfigured(plugin, setting):
+            "\(plugin): \(UsageFormatter.localized("Configure endpoint settings")) (\(setting))"
         case let .networkPolicy(message): "Provider plugin network policy rejected the request: \(message)"
         case let .http(message): "Provider plugin HTTP error: \(message)"
         case let .secretAccess(message): "Provider plugin secret access denied: \(message)"
@@ -572,6 +598,28 @@ enum ProviderPluginTransientHTTPFailure {
 }
 
 extension ProviderPluginManifest {
+    private static func validatedDashboardURL(_ raw: String) throws -> URL {
+        guard raw.utf8.count <= 2048, let url = URL(string: raw) else {
+            throw ProviderPluginError.networkPolicy("URL does not satisfy the declared endpoint policy")
+        }
+        _ = try ProviderPluginOrigin.normalizedOrigin(of: url, policy: .httpsOrPrivateNetworkHTTP)
+        return url
+    }
+
+    func dashboardURL(settings: [String: String]) throws -> URL? {
+        let raw: String?
+        switch self.dashboardLink {
+        case let .fixed(value)?: raw = value
+        case let .setting(key)?: raw = settings[key]
+        case nil: return nil
+        }
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        let url = try Self.validatedDashboardURL(raw)
+        if try self.allowedOrigin(for: url, settings: settings) { return url }
+        if case .fixed? = self.dashboardLink, url.scheme?.lowercased() == "https" { return url }
+        throw ProviderPluginError.networkPolicy("URL does not satisfy the declared endpoint policy")
+    }
+
     func allowedOrigin(for url: URL, settings: [String: String]) throws -> Bool {
         for endpoint in self.endpoints {
             switch endpoint {

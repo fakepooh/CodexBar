@@ -103,6 +103,9 @@ extension CodexBarCLI {
         for origin in binding.origins {
             writeStderr("  origin: \(origin)\n")
         }
+        if let dashboardURL = binding.dashboardURL {
+            writeStderr("  \(UsageFormatter.localized("Usage Dashboard")): \(dashboardURL)\n")
+        }
         writeStderr("  auth: \(binding.authMode)\n")
         writeStderr("  capabilities: \(binding.capabilities.joined(separator: ", "))\n")
         writeStderr("  secrets: \(binding.secretNames.joined(separator: ", "))\n")
@@ -119,11 +122,12 @@ extension CodexBarCLI {
 
     static func pluginSnapshotLines(plugin: UserProviderPlugin, snapshot: UsageSnapshot) -> [String] {
         var lines = [plugin.manifest.name]
-        if let primary = snapshot.primary {
-            lines.append("Primary: \(Int(primary.usedPercent.rounded()))% used")
-        }
-        if let secondary = snapshot.secondary {
-            lines.append("Secondary: \(Int(secondary.usedPercent.rounded()))% used")
+        for (fallback, window) in [
+            ("Primary", snapshot.primary), ("Secondary", snapshot.secondary), ("Tertiary", snapshot.tertiary),
+        ] {
+            if let window {
+                lines.append("\(window.title ?? fallback): \(Int(window.usedPercent.rounded()))% used")
+            }
         }
         if let cost = snapshot.providerCost {
             lines.append("Cost: \(cost.used) \(cost.currencyCode)")

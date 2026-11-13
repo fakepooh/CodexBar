@@ -1,20 +1,139 @@
+import Darwin
 import Foundation
 import Testing
 import WebKit
 @testable import CodexBar
 @testable import CodexBarCore
 
-/// Tests for OpenAIDashboardWebViewCache to verify WebView reuse behavior.
-///
-/// Background: The cache should keep WebViews alive after use to avoid re-downloading
-/// the ChatGPT SPA bundle on every refresh. Previously, WebViews were destroyed after
-/// each fetch, causing 15+ GB of network traffic over time. See GitHub issues #269, #251.
+/// Verifies per-store isolation, lease ownership, handoff reuse and teardown.
 @MainActor
 @Suite(.serialized)
 struct OpenAIDashboardWebViewCacheTests {
     private func shouldSkipOnCI() -> Bool {
         let env = ProcessInfo.processInfo.environment
         return env["GITHUB_ACTIONS"] == "true" || env["CI"] == "true"
+    }
+
+    @Test(arguments: [false, true])
+    func `refresh deadline stops WebContent during preparation and leased evaluation`(_ preparing: Bool) async throws {
+        _ = NSApplication.shared
+        let cache = OpenAIDashboardWebViewCache()
+        defer { cache.clearAllForTesting() }
+        let store = WKWebsiteDataStore.nonPersistent()
+        let webView = cache.cacheEntryForTesting(websiteDataStore: store)
+        try await Self.loadOfflinePage(webView)
+        let selector = NSSelectorFromString("_webProcessIdentifier")
+        try #require(webView.responds(to: selector))
+        let pid = try #require((webView.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value)
+        try #require(pid > 0)
+        var evaluationError: NSError?
+        cache.prepareForTesting = { view, _, _ in
+            if preparing {
+                evaluationError = await Self.stall(view)
+                if let evaluationError { throw evaluationError }
+            }
+        }
+        let started = Date()
+        var lease: OpenAIDashboardWebViewLease?
+        var temporary: OpenAIDashboardWebViewLease?
+        var temporaryPID: Int32?
+        defer {
+            lease?.release()
+            temporary?.release()
+        }
+        do {
+            lease = try await cache.acquire(
+                websiteDataStore: store,
+                usageURL: #require(URL(string: "about:blank")),
+                logger: nil,
+                navigationTimeout: 2,
+                allowTimeoutRetry: false)
+            if !preparing {
+                temporary = try await cache.acquire(
+                    websiteDataStore: store,
+                    usageURL: #require(URL(string: "about:blank")),
+                    logger: nil,
+                    navigationTimeout: 10)
+                let temporaryView = try #require(temporary?.webView)
+                try await Self.loadOfflinePage(temporaryView)
+                temporaryPID = (temporaryView.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value
+                evaluationError = await Self.stall(webView)
+            }
+        } catch {
+            #expect(preparing)
+        }
+        let error = evaluationError
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(error != nil, "Terminating WebContent must fail its pending evaluation")
+        #expect(!cache.hasCachedEntry(for: store))
+        let exitDeadline = Date().addingTimeInterval(2)
+        while kill(pid, 0) == 0, Date() < exitDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let exited = kill(pid, 0) == -1 && errno == ESRCH
+        #expect(exited, "The synthetic page's WebContent process must exit")
+        if let temporaryPID, let temporary {
+            #expect(temporaryPID != pid)
+            #expect(kill(temporaryPID, 0) == 0, "A concurrent temporary page must remain alive")
+            let title = try await temporary.webView.evaluateJavaScript("document.title") as? String
+            #expect(title == "Offline fixture")
+        }
+        print("Deadline fixture: elapsed=\(elapsed), processExited=\(exited)")
+    }
+
+    private static func loadOfflinePage(_ webView: WKWebView) async throws {
+        let navigation = Navigation()
+        defer {
+            webView.navigationDelegate = nil
+            withExtendedLifetime(navigation) {}
+        }
+        try await withCheckedThrowingContinuation { continuation in
+            navigation.completion = continuation
+            webView.navigationDelegate = navigation
+            webView.loadHTMLString("<html><title>Offline fixture</title></html>", baseURL: nil)
+        }
+    }
+
+    private static func stall(_ webView: WKWebView) async -> NSError? {
+        // Finite so the regression safely completes even without containment.
+        webView.evaluateJavaScript("""
+        (() => {
+          const end = Date.now() + 5000;
+          function spin() { if (Date.now() < end) Promise.resolve().then(spin); }
+          spin();
+        })();
+        """, completionHandler: nil)
+        try? await Task.sleep(for: .milliseconds(100))
+        return await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript("document.title") { _, error in
+                continuation.resume(returning: error as NSError?)
+            }
+        }
+    }
+
+    private final class Navigation: NSObject, WKNavigationDelegate {
+        var completion: CheckedContinuation<Void, any Error>?
+
+        func webView(_: WKWebView, didFinish _: WKNavigation!) {
+            self.complete(.success(()))
+        }
+
+        func webView(_: WKWebView, didFail _: WKNavigation!, withError error: any Error) {
+            self.complete(.failure(error))
+        }
+
+        func webView(_: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError error: any Error) {
+            self.complete(.failure(error))
+        }
+
+        func webViewWebContentProcessDidTerminate(_: WKWebView) {
+            self.complete(.failure(URLError(.networkConnectionLost)))
+        }
+
+        private func complete(_ result: Result<Void, any Error>) {
+            self.completion?.resume(with: result)
+            self.completion = nil
+        }
     }
 
     // MARK: - Data Store Identity Tests

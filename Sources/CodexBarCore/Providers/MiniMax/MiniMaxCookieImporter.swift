@@ -9,14 +9,24 @@ private let minimaxCookieImportOrder: BrowserCookieImportOrder =
 public enum MiniMaxCookieImporter {
     private static let log = CodexBarLog.logger(LogCategories.provider(.minimax, scope: "cookie"))
     private static let cookieClient = BrowserCookieClient()
-    private static let cookieDomains = [
-        "platform.minimax.io",
-        "openplatform.minimax.io",
-        "minimax.io",
-        "platform.minimaxi.com",
-        "openplatform.minimaxi.com",
-        "minimaxi.com",
-    ]
+    static var cookieQuery: BrowserCookieQuery {
+        BrowserCookieQuery(domains: [
+            "platform.minimax.io",
+            "openplatform.minimax.io",
+            "account.minimax.io",
+            "www.minimax.io",
+            "minimax.io",
+            "platform.minimax.cn",
+            "account.minimax.cn",
+            "www.minimax.cn",
+            "minimax.cn",
+            "platform.minimaxi.com",
+            "openplatform.minimaxi.com",
+            "account.minimaxi.com",
+            "www.minimaxi.com",
+            "minimaxi.com",
+        ], domainMatch: .exact)
+    }
 
     public struct SessionInfo: Sendable {
         public let cookies: [HTTPCookie]
@@ -36,8 +46,15 @@ public enum MiniMaxCookieImporter {
         browserDetection: BrowserDetection,
         logger: ((String) -> Void)? = nil) throws -> [SessionInfo]
     {
+        try Array(self.sessionCandidates(browserDetection: browserDetection, logger: logger))
+    }
+
+    static func sessionCandidates(
+        browserDetection: BrowserDetection,
+        logger: ((String) -> Void)? = nil) throws -> AnySequence<SessionInfo>
+    {
         try BrowserCookieImportSupport.collectSessions(
-            from: minimaxCookieImportOrder.cookieImportCandidates(using: browserDetection),
+            from: minimaxCookieImportOrder.lazyCookieImportCandidates(using: browserDetection),
             missingError: MiniMaxCookieImportError.noCookies,
             logger: { self.emit($0, logger: logger) },
             load: { try self.importSessions(from: $0, logger: logger) })
@@ -48,11 +65,9 @@ public enum MiniMaxCookieImporter {
         logger: ((String) -> Void)? = nil) throws -> [SessionInfo]
     {
         let log: (String) -> Void = { message in self.emit(message, logger: logger) }
-        let profiles = try BrowserCookieImportSupport.loadProfiles(
-            from: browserSource,
-            domains: self.cookieDomains,
-            client: self.cookieClient,
-            logger: log)
+        let query = self.cookieQuery
+        let records = try self.cookieClient.codexBarRecords(matching: query, in: browserSource, logger: log)
+        let profiles = BrowserCookieImportSupport.httpCookieProfiles(from: records, origin: query.origin)
         var sessions: [SessionInfo] = []
         for (label, httpCookies) in profiles {
             log("Found \(httpCookies.count) MiniMax cookies in \(label)")
@@ -70,8 +85,8 @@ public enum MiniMaxCookieImporter {
         browserDetection: BrowserDetection,
         logger: ((String) -> Void)? = nil) throws -> SessionInfo
     {
-        let sessions = try self.importSessions(browserDetection: browserDetection, logger: logger)
-        guard let first = sessions.first else {
+        let sessions = try self.sessionCandidates(browserDetection: browserDetection, logger: logger)
+        guard let first = sessions.first(where: { _ in true }) else {
             throw MiniMaxCookieImportError.noCookies
         }
         return first
@@ -79,7 +94,8 @@ public enum MiniMaxCookieImporter {
 
     public static func hasSession(browserDetection: BrowserDetection, logger: ((String) -> Void)? = nil) -> Bool {
         do {
-            return try !self.importSessions(browserDetection: browserDetection, logger: logger).isEmpty
+            return try self.sessionCandidates(browserDetection: browserDetection, logger: logger)
+                .contains(where: { _ in true })
         } catch {
             return false
         }

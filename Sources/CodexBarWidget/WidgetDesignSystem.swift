@@ -1,6 +1,64 @@
+import AppKit
 import CodexBarCore
+import Foundation
 import SwiftUI
 import WidgetKit
+
+/// Widget catalogs are generated from the app catalogs by sync-widget-locales.mjs.
+enum WidgetLocalization {
+    static let resourceBundle: Bundle = {
+        #if SWIFT_PACKAGE
+        return .module
+        #else
+        return .main
+        #endif
+    }()
+
+    static var currentBundle: Bundle {
+        #if SWIFT_PACKAGE
+        let defaultLanguage = TestProcessSafety.isRunning ? "en" : ""
+        #else
+        let defaultLanguage = ""
+        #endif
+        let language = WidgetLocalizationOverride.language ?? defaultLanguage
+        return self.bundle(language: language)
+    }
+
+    static func bundle(language: String, resourceBundle: Bundle = WidgetLocalization.resourceBundle) -> Bundle {
+        let language = language.isEmpty
+            ? Bundle.preferredLocalizations(from: resourceBundle.localizations).first ?? "en"
+            : language
+        // Native SwiftPM builds lowercase language-directory names, including region and script suffixes.
+        for candidate in [language, language.lowercased()] {
+            if let path = resourceBundle.path(forResource: candidate, ofType: "lproj"),
+               let bundle = Bundle(path: path)
+            {
+                return bundle
+            }
+        }
+        return resourceBundle
+    }
+}
+
+enum WidgetLocalizationOverride {
+    @TaskLocal static var language: String?
+}
+
+func W(_ key: String, _ arguments: CVarArg...) -> String {
+    let bundle = WidgetLocalization.currentBundle
+    var value = bundle.localizedString(forKey: key, value: nil, table: nil)
+    if value.isEmpty || value == key,
+       let path = WidgetLocalization.resourceBundle.path(forResource: "en", ofType: "lproj"),
+       let english = Bundle(path: path)
+    {
+        value = english.localizedString(forKey: key, value: nil, table: nil)
+    }
+    let language = bundle.bundleURL.deletingPathExtension().lastPathComponent
+    let locale = bundle.bundleURL.pathExtension == "lproj"
+        ? Locale(identifier: language == "ar" ? "ar@numbers=arab" : language)
+        : Locale.current
+    return arguments.isEmpty ? value : String(format: value, locale: locale, arguments: arguments)
+}
 
 extension EnvironmentValues {
     /// Mirrors the app's "show used instead of remaining" preference into the tiles.
@@ -84,28 +142,6 @@ enum ProviderMonogram {
     }
 }
 
-// MARK: - Contrast
-
-enum WidgetContrast {
-    /// Black-vs-white crossover for WCAG relative luminance: below this a white label wins, above
-    /// it a black label wins. Solving 1.05/(L+0.05) = (L+0.05)/0.05 gives L ≈ 0.1791.
-    private static let crossoverLuminance: Double = 0.1791
-
-    /// Highest-contrast label colour for text drawn on `color`. Brand palettes span very light
-    /// (Gemini lilac) to mid (Claude terracotta); picking per colour keeps every mark legible.
-    static func label(on color: ProviderColor) -> Color {
-        self.relativeLuminance(of: color) > self.crossoverLuminance ? .black : .white
-    }
-
-    static func relativeLuminance(of color: ProviderColor) -> Double {
-        func linear(_ value: Double) -> Double {
-            let clamped = min(1, max(0, value))
-            return clamped <= 0.03928 ? clamped / 12.92 : pow((clamped + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
-    }
-}
-
 // MARK: - Provider mark
 
 struct ProviderMark: View {
@@ -117,21 +153,76 @@ struct ProviderMark: View {
     @Environment(\.widgetRenderingModeOverride) private var renderingModeOverride
 
     var body: some View {
+        let mode = self.renderingModeOverride ?? self.renderingMode
         let style = ProviderMarkStyle.resolve(
-            renderingMode: self.renderingModeOverride ?? self.renderingMode,
+            renderingMode: mode,
             provider: self.provider,
             isSelected: self.isSelected)
-        Text(ProviderMonogram.text(for: self.provider))
-            .font(.system(size: self.size * 0.44, weight: .bold, design: .rounded))
-            .kerning(-0.3)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .foregroundStyle(style.foreground)
-            .frame(width: self.size, height: self.size)
-            .background(
-                RoundedRectangle(cornerRadius: self.size * 0.3, style: .continuous)
-                    .fill(style.background))
-            .accessibilityLabel(Text(ProviderMarkLabel.text(for: self.provider, isSelected: self.isSelected)))
+        let image = WidgetProviderMarkAsset.image(for: self.provider, fullColor: mode == .fullColor && self.isSelected)
+        ZStack {
+            RoundedRectangle(cornerRadius: self.size * 0.28, style: .continuous)
+                .fill(style.background)
+            RoundedRectangle(cornerRadius: self.size * 0.28, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .renderingMode(image.isTemplate ? .template : .original)
+                    .scaledToFit()
+                    .foregroundStyle(style.foreground)
+                    .padding(self.size * 0.2)
+                    .widgetAccentable()
+            } else {
+                Text(ProviderMonogram.text(for: self.provider))
+                    .font(.system(size: self.size * 0.44, weight: .bold, design: .rounded))
+                    .kerning(-0.3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .foregroundStyle(style.foreground)
+            }
+        }
+        .frame(width: self.size, height: self.size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(ProviderMarkLabel.text(for: self.provider, isSelected: self.isSelected)))
+    }
+}
+
+/// The provider's real mark, bundled for the curated widget providers.
+///
+/// The files are copies of the app's own `ProviderIcon-*` and `Brand-ProviderIcon-*` resources (a test keeps
+/// them byte-identical); providers without a bundled mark keep their monogram.
+@MainActor
+enum WidgetProviderMarkAsset {
+    /// Same normalization as the app's `ProviderBrandIcon`: several marks (Kimi, MiniMax) are `1em`
+    /// SVGs that NSImage reads as 1x1 points, which rasterizes them into a smudge before SwiftUI scales.
+    static let size = NSSize(width: 18, height: 18)
+    private static var cache: [String: NSImage] = [:]
+
+    static func image(for provider: UsageProvider, fullColor: Bool) -> NSImage? {
+        let template = ProviderDescriptorRegistry.descriptor(for: provider).branding.iconResourceName
+        let names = fullColor
+            ? ["Brand-ProviderIcon-" + provider.rawValue, template]
+            : [template]
+        for name in names {
+            if let image = self.load(name, isTemplate: name == template) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    private static func load(_ name: String, isTemplate: Bool) -> NSImage? {
+        if let cached = self.cache[name] {
+            return cached
+        }
+        let bundle = WidgetLocalization.resourceBundle
+        let url = bundle.url(forResource: name, withExtension: "svg")
+            ?? bundle.url(forResource: name, withExtension: "svg", subdirectory: "ProviderMarks")
+        guard let url, let image = NSImage(contentsOf: url) else { return nil }
+        image.size = self.size
+        image.isTemplate = isTemplate
+        self.cache[name] = image
+        return image
     }
 }
 
@@ -140,9 +231,12 @@ struct ProviderMarkStyle {
     let background: Color
 
     /// Desktop widgets in tinted and clear appearances render through a luminance mask, so a brand
-    /// fill carrying a dark label collapses to an empty white square — the monogram disappears
-    /// entirely. Outside full colour the mark inverts: a faint plate with a bright label, which
-    /// survives the mask.
+    /// fill would collapse into a solid square. Outside full colour the mark is a bright template glyph
+    /// on a faint plate, which survives the mask.
+    ///
+    /// In full colour the brand tint only washes the plate; it never carries the glyph's contrast. The
+    /// glyph is the curated full-colour mark or the template mark in ink, so a pale tint (Gemini) or a
+    /// mid tone (Codex) cannot leave a low-contrast logo.
     static func resolve(
         renderingMode: WidgetRenderingMode,
         provider: UsageProvider,
@@ -158,10 +252,9 @@ struct ProviderMarkStyle {
                 foreground: .primary.opacity(0.62),
                 background: .primary.opacity(0.08))
         }
-        let brand = ProviderBrandColor.resolve(for: provider.instanceID)
         return ProviderMarkStyle(
-            foreground: brand.map(WidgetContrast.label(on:)) ?? .white,
-            background: WidgetColors.color(for: provider.instanceID))
+            foreground: .primary,
+            background: WidgetColors.color(for: provider.instanceID).opacity(0.16))
     }
 }
 
@@ -174,16 +267,7 @@ enum ProviderTitle {
 enum ProviderMarkLabel {
     static func text(for provider: UsageProvider, isSelected: Bool) -> String {
         let name = ProviderDefaults.metadata[provider]?.displayName ?? provider.rawValue.capitalized
-        return isSelected ? "\(name), selected" : name
-    }
-}
-
-enum ProviderBrandColor {
-    /// The raw brand colour behind `WidgetColors.color(for:)`, needed for contrast maths.
-    static func resolve(for instanceID: ProviderInstanceID) -> ProviderColor? {
-        guard let provider = instanceID.firstPartyProvider else { return nil }
-        return ProviderAccentColors.sharedOverride(for: instanceID)
-            ?? ProviderDescriptorRegistry.descriptor(for: provider).branding.widgetColor
+        return isSelected ? W("%@, selected", name) : name
     }
 }
 
@@ -192,9 +276,14 @@ enum ProviderBrandColor {
 struct QuotaBar: View {
     let percent: Double?
     let color: Color
+    var isLow: Bool = false
     var height: CGFloat = WidgetLayout.barHeight
 
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.widgetRenderingModeOverride) private var renderingModeOverride
+
     var body: some View {
+        let fullColor = (self.renderingModeOverride ?? self.renderingMode) == .fullColor
         GeometryReader { proxy in
             let fraction = QuotaBar.fillFraction(self.percent)
             ZStack(alignment: .leading) {
@@ -203,8 +292,10 @@ struct QuotaBar: View {
                     // Floor the fill at the bar's own height so a nearly-exhausted lane reads as a
                     // visible nub instead of a sliver indistinguishable from an empty track.
                     Capsule()
-                        .fill(self.color)
-                        .frame(width: max(self.height, fraction * proxy.size.width))
+                        // Red loses warning contrast in WidgetKit's luminance mask.
+                            .fill(self.isLow ? (fullColor ? .red : .primary) : self.color)
+                            .widgetAccentable(self.isLow)
+                            .frame(width: max(self.height, fraction * proxy.size.width))
                 }
             }
         }
@@ -231,7 +322,7 @@ struct QuotaLaneView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(self.title)
+                Text(W(self.title))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -244,7 +335,10 @@ struct QuotaLaneView: View {
                     .lineLimit(1)
             }
             if self.showsBar {
-                QuotaBar(percent: self.percent, color: self.color)
+                QuotaBar(
+                    percent: self.percent,
+                    color: self.color,
+                    isLow: QuotaSeverity.isLow(remaining: self.remainingPercent))
             }
         }
     }
@@ -275,6 +369,7 @@ struct HeroBlock: View {
     /// under the headline.
     var spreads: Bool = false
     var compact: Bool = false
+    var inlineQuotaTitle: String?
 
     var isUnavailable: Bool {
         self.value == WidgetFormat.unavailable
@@ -289,7 +384,31 @@ struct HeroBlock: View {
         VStack(alignment: .leading, spacing: 2) {
             // A missing figure is drawn small and muted: at headline size the em-dash placeholder
             // reads as a heavy black bar, which looks like a broken tile rather than "no data".
-            if self.compact {
+            if let title = self.inlineQuotaTitle {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(title)
+                            .font(.headline)
+                            .foregroundStyle(self.unavailableAwareColor)
+                            .fixedSize()
+                        Spacer(minLength: 4)
+                        self.detail?
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                            // Native live date text needs a finite proposal for ViewThatFits in WidgetKit.
+                            .frame(width: 120, alignment: .trailing)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.headline)
+                            .foregroundStyle(self.unavailableAwareColor)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.75)
+                        self.detail?.font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            } else if self.compact {
                 HStack(alignment: .center, spacing: 5) {
                     self.valueText
                     self.caption?
@@ -309,7 +428,7 @@ struct HeroBlock: View {
                         .minimumScaleFactor(0.75)
                 }
             }
-            if let detail = self.detail {
+            if self.inlineQuotaTitle == nil, let detail = self.detail {
                 detail
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -323,6 +442,7 @@ struct HeroBlock: View {
                 QuotaBar(
                     percent: barPercent,
                     color: self.color,
+                    isLow: self.isLow,
                     height: self.compact ? 6 : WidgetLayout.heroBarHeight)
                     .padding(.top, self.spreads ? 0 : self.compact ? 2 : 5)
             }
@@ -424,11 +544,40 @@ struct FreshnessLabel: View {
     var body: some View {
         // WidgetKit advances native date text between reloads; a formatted TimelineView string can freeze.
         // fixedSize on live date text can erase the rest of the tile.
-        Text(self.updatedAt, style: .relative)
+        WidgetDateText.offset(self.updatedAt)
             .font(.caption2)
             .foregroundStyle(WidgetFreshness
                 .isStale(self.updatedAt) ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
             .lineLimit(1)
+    }
+}
+
+enum WidgetDateText {
+    static func offset(_ date: Date) -> Text {
+        if #available(macOS 15, *) {
+            return Text(.currentDate, format: self.ageFormat(date))
+        }
+        return Text(date, style: .relative)
+    }
+
+    @available(macOS 15, *)
+    static func ageFormat(_ date: Date) -> SystemFormatStyle.DateOffset {
+        .init(to: date, allowedFields: [.day, .hour, .minute], maxFieldCount: 2, sign: .never)
+    }
+
+    static func reset(_ date: Date) -> Text {
+        if #available(macOS 15, *) {
+            // System date references update visually in the out-of-process WidgetKit host.
+            return Text(
+                "Resets \(Text(.currentDate, format: self.resetFormat(date)))",
+                bundle: WidgetLocalization.currentBundle)
+        }
+        return Text("Resets in \(Text(date, style: .relative))", bundle: WidgetLocalization.currentBundle)
+    }
+
+    @available(macOS 15, *)
+    static func resetFormat(_ date: Date) -> SystemFormatStyle.DateReference {
+        .init(to: date, allowedFields: [.day, .hour, .minute], maxFieldCount: 2, thresholdField: .minute)
     }
 }
 
@@ -447,7 +596,7 @@ struct WidgetEmptyState: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("Open CodexBar")
+            Text(W("Open CodexBar"))
                 .font(.subheadline.weight(.semibold))
             Text(self.message)
                 .font(.caption)

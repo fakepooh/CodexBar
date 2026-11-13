@@ -150,21 +150,14 @@ public enum KiroUsageLimitsAPI: Sendable {
         transport: any ProviderHTTPTransport) async throws -> KiroUsageLimits
     {
         let identity = try self.readIdentity(databaseURL: databaseURL)
-        let arn = identity.profileARN.split(separator: ":", maxSplits: 5, omittingEmptySubsequences: false)
-        guard arn.count == 6, arn[0] == "arn", arn[1] == "aws", arn[2] == "codewhisperer",
-              arn[5].hasPrefix("profile/"), arn[5].count > "profile/".count,
-              identity.profileARN.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil,
-              let endpoint = self.profileEndpoints[String(arn[3])]
-        else {
-            throw KiroUsageLimitsError.credentialsUnavailable("unsupported profile ARN")
-        }
+        let endpoint = try self.usageEndpoint(profileARN: identity.profileARN)
         var request = URLRequest(url: endpoint, timeoutInterval: self.requestTimeout)
         request.httpMethod = "POST"
         request.setValue(self.contentType, forHTTPHeaderField: "Content-Type")
         request.setValue(self.target, forHTTPHeaderField: "X-Amz-Target")
         request.setValue("Bearer \(identity.accessToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(
-            withJSONObject: ["profileArn": identity.profileARN])
+            withJSONObject: identity.profileARN.map { ["profileArn": $0] } ?? [:])
 
         let data: Data
         let response: URLResponse
@@ -182,6 +175,36 @@ public enum KiroUsageLimitsAPI: Sendable {
             throw KiroUsageLimitsError.requestFailed("HTTP \(http.statusCode)")
         }
         return try self.parse(data)
+    }
+
+    static func ensureReachable(
+        databaseURL: URL = stateDatabaseURL(),
+        transport: any ProviderHTTPTransport = isolatedTransport) async throws
+    {
+        try Task.checkCancellation()
+        // Missing private CLI state must not bypass the background sign-in guard.
+        let endpoint = (try? self.usageEndpoint(profileARN: self.readIdentity(databaseURL: databaseURL).profileARN))
+            ?? self.profileEndpoints["us-east-1"]!
+        var request = URLRequest(url: endpoint, timeoutInterval: 4)
+        request.httpMethod = "HEAD"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        // Any HTTP response proves reachability; propagate transport failures for shared snapshot preservation.
+        _ = try await transport.data(for: request)
+    }
+
+    private static func usageEndpoint(profileARN: String?) throws -> URL {
+        // Builder ID logins can have a token without a persisted profile. A present but invalid
+        // profile must still fail closed instead of sending credentials to a different region.
+        guard let profileARN else { return self.profileEndpoints["us-east-1"]! }
+        let arn = profileARN.split(separator: ":", maxSplits: 5, omittingEmptySubsequences: false)
+        guard arn.count == 6, arn[0] == "arn", arn[1] == "aws", arn[2] == "codewhisperer",
+              arn[5].hasPrefix("profile/"), arn[5].count > "profile/".count,
+              profileARN.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil,
+              let endpoint = self.profileEndpoints[String(arn[3])]
+        else {
+            throw KiroUsageLimitsError.credentialsUnavailable("unsupported profile ARN")
+        }
+        return endpoint
     }
 
     static func parse(_ data: Data) throws -> KiroUsageLimits {
@@ -275,6 +298,9 @@ public enum KiroUsageLimitsAPI: Sendable {
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
+        #if !os(Linux)
+        configuration.waitsForConnectivity = false
+        #endif
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return ProviderHTTPClient(session: ProviderHTTPClient.redirectGuardedSession(configuration: configuration))
     }()
@@ -310,7 +336,7 @@ public enum KiroUsageLimitsAPI: Sendable {
 
     private struct KiroCLIIdentity {
         let accessToken: String
-        let profileARN: String
+        let profileARN: String?
     }
 
     /// Reads the CLI's credentials without disturbing them: the CLI owns the token and its refresh,
@@ -341,16 +367,21 @@ public enum KiroUsageLimitsAPI: Sendable {
             db: db,
             sql: "SELECT value FROM auth_kv WHERE key = 'kirocli:odic:token'",
             what: "token")
-        let profileJSON = try self.queryValue(
-            db: db,
-            sql: "SELECT value FROM state WHERE key = 'api.codewhisperer.profile'",
-            what: "profile")
-
         guard let accessToken = self.jsonString(in: tokenJSON, key: "access_token") else {
             throw KiroUsageLimitsError.credentialsUnavailable("token has no access_token")
         }
-        guard let profileARN = self.jsonString(in: profileJSON, key: "arn") else {
-            throw KiroUsageLimitsError.credentialsUnavailable("profile has no arn")
+        let profileJSON = try self.queryOptionalValue(
+            db: db,
+            sql: "SELECT value FROM state WHERE key = 'api.codewhisperer.profile'",
+            what: "profile")
+        let profileARN: String?
+        if let profileJSON {
+            guard let arn = self.jsonString(in: profileJSON, key: "arn") else {
+                throw KiroUsageLimitsError.credentialsUnavailable("profile has no arn")
+            }
+            profileARN = arn
+        } else {
+            profileARN = nil
         }
         return KiroCLIIdentity(accessToken: accessToken, profileARN: profileARN)
         #else
@@ -360,13 +391,22 @@ public enum KiroUsageLimitsAPI: Sendable {
 
     #if canImport(SQLite3) || canImport(CSQLite3)
     private static func queryValue(db: OpaquePointer?, sql: String, what: String) throws -> String {
+        guard let value = try self.queryOptionalValue(db: db, sql: sql, what: what) else {
+            throw KiroUsageLimitsError.credentialsUnavailable("\(what) not found in Kiro CLI state")
+        }
+        return value
+    }
+
+    private static func queryOptionalValue(db: OpaquePointer?, sql: String, what: String) throws -> String? {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
             throw KiroUsageLimitsError.credentialsUnavailable("read \(what): \(message)")
         }
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else {
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return nil }
+        guard result == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else {
             throw KiroUsageLimitsError.credentialsUnavailable("\(what) not found in Kiro CLI state")
         }
         return String(cString: text)

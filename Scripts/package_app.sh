@@ -97,6 +97,12 @@ source "$ROOT/version.env"
 source "$ROOT/Scripts/package_product_paths.sh"
 source "$ROOT/Scripts/sparkle_signing_paths.sh"
 
+# SwiftBuild can record the deployment target as the SDK, enabling legacy native UI.
+CODEXBAR_MACOS_SDK_PATH=$(xcrun --sdk macosx --show-sdk-path)
+SDK_VERSION=$(xcrun --sdk macosx --show-sdk-version)
+BUILD_ARGS=(--sdk "$CODEXBAR_MACOS_SDK_PATH"
+  -Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker "$SDK_VERSION")
+
 # Clean build only when explicitly requested (slower).
 if [[ "${CODEXBAR_FORCE_CLEAN:-0}" == "1" ]]; then
   if [[ -d "$ROOT/.build" ]]; then
@@ -188,7 +194,7 @@ PY
 
 KEYBOARD_SHORTCUTS_UTIL="$ROOT/.build/checkouts/KeyboardShortcuts/Sources/KeyboardShortcuts/Utilities.swift"
 if [[ ! -f "$KEYBOARD_SHORTCUTS_UTIL" ]]; then
-  swift build -c "$CONF" --arch "${ARCH_LIST[0]}"
+  swift build "${BUILD_ARGS[@]}" -c "$CONF" --arch "${ARCH_LIST[0]}"
 fi
 patch_keyboard_shortcuts
 
@@ -235,6 +241,14 @@ stage_build_products() {
       echo "ERROR: ${product} does not contain required architecture: ${arch}" >&2
       return 1
     fi
+    if ! otool -arch "$arch" -l "$product" | awk -v sdk="$SDK_VERSION" '
+      $1 == "cmd" { build = ($2 == "LC_BUILD_VERSION") }
+      build && $1 == "minos" { minimum = ($2 == "14.0") }
+      build && $1 == "sdk" { valid = (minimum && $2 == sdk) }
+      END { exit !valid }'; then
+      echo "ERROR: Expected macOS 14.0 / SDK ${SDK_VERSION} for ${product} (${arch})." >&2
+      return 1
+    fi
     cp "$product" "$stage_dir/$name"
   done
   if [[ -d "$bin_dir/CodexBar.dSYM" ]]; then
@@ -243,7 +257,7 @@ stage_build_products() {
 }
 
 for ARCH in "${ARCH_LIST[@]}"; do
-  swift build -c "$CONF" --arch "$ARCH"
+  swift build "${BUILD_ARGS[@]}" -c "$CONF" --arch "$ARCH"
   stage_build_products "$ARCH"
 done
 
@@ -359,11 +373,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
+    <key>LSEnvironment</key>
+    <dict>
+        <key>MallocLargeCache</key><string>0</string>
+    </dict>
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>NSHumanReadableCopyright</key><string>© 2026 Peter Steinberger. MIT License.</string>
     <key>SUFeedURL</key><string>${FEED_URL}</string>
     <key>SUPublicEDKey</key><string>AGCY8w5vHirVfGGDGc8Szc5iuOqupZSh9pMj/Qs67XI=</string>
     <key>SUEnableAutomaticChecks</key><${AUTO_CHECKS}/>
+    <key>SUAutomaticallyUpdate</key><true/>
     <key>CodexBuildTimestamp</key><string>${BUILD_TIMESTAMP}</string>
     <key>CodexGitCommit</key><string>${GIT_COMMIT}</string>
     <key>CodexBarTeamID</key><string>${APP_TEAM_ID}</string>

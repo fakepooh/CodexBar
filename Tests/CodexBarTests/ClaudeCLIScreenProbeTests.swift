@@ -3,6 +3,43 @@ import Testing
 @testable import CodexBarCore
 
 struct ClaudeCLIScreenProbeTests {
+    @Test
+    func `usage capture waits for the refreshing panel to finish its scoped redraw`() throws {
+        let firstFrame = "\u{1b}[H" + """
+        Current session
+        9% used
+        Current week (all models)
+        67% used
+        What's contributing to your limits usage?
+        Scanning local sessions…
+        Refreshing…
+        Esc to cancel
+        """.replacingOccurrences(of: "\n", with: "\r\n")
+        let finalFrame = "\u{1b}[H\u{1b}[J" + """
+        Current session
+        9% used
+        Current week (all models)
+        67% used
+        Current week (Example Model)
+        42% used
+        What's contributing to your limits usage?
+        Scanning local sessions…
+        Esc to cancel
+        """.replacingOccurrences(of: "\n", with: "\r\n") + "\u{1b}[J"
+        func normalizedScreen(_ capture: String) -> String {
+            String(ClaudeCLIScreen.render(capture).lowercased().filter { !$0.isWhitespace })
+        }
+
+        #expect(!ClaudeStatusProbe.usageCaptureIsComplete(normalizedScreen(firstFrame)))
+        #expect(!ClaudeStatusProbe.usageCaptureIsComplete(normalizedScreen(
+            firstFrame.replacingOccurrences(of: "Refreshing…", with: "Refreshing..."))))
+        let completed = firstFrame + finalFrame
+        #expect(ClaudeStatusProbe.usageCaptureIsComplete(normalizedScreen(completed)))
+        let snapshot = try ClaudeStatusProbe.parse(text: completed)
+        #expect(snapshot.extraRateWindows.first?.window.usedPercent == 42)
+        #expect(ClaudeStatusProbe.usageCaptureIsComplete("currentsession9%used"))
+    }
+
     static func capture(_ name: String) throws -> String {
         let url = try #require(Bundle.module.url(
             forResource: name,
@@ -22,6 +59,18 @@ struct ClaudeCLIScreenProbeTests {
         let fable = try #require(snapshot.extraRateWindows.first { $0.id == "claude-weekly-scoped-fable" })
         #expect(fable.title == "Fable only")
         #expect(fable.window.usedPercent == 51)
+    }
+
+    @Test
+    func `panel taller than fifty rows keeps the session quota on screen`() throws {
+        let text = try Self.capture("usage-pty-2.1.294-tall-panel")
+        let snapshot = try ClaudeStatusProbe.parse(text: text)
+        #expect(snapshot.sessionPercentLeft == 93)
+        #expect(snapshot.primaryResetDescription == "Resets 2:30pm (Europe/Malta)")
+        #expect(snapshot.weeklyPercentLeft == 80)
+        #expect(snapshot.secondaryResetDescription == "Resets Oct 14, 10pm (Europe/Malta)")
+        let fable = try #require(snapshot.extraRateWindows.first { $0.id == "claude-weekly-scoped-fable" })
+        #expect(fable.window.usedPercent == 2)
     }
 
     @Test
@@ -49,7 +98,7 @@ struct ClaudeCLIScreenProbeTests {
 
     @Test
     func `styled plain reports are not clipped or wrapped to PTY geometry`() throws {
-        let padding = String(repeating: "report detail\n", count: 55)
+        let padding = String(repeating: "report detail\n", count: ClaudeCLIScreen.rows + 5)
         let organization = String(repeating: "Example", count: 30)
         let text = "\u{1b}[32mCurrent session\n3% used\n" + padding
             + "Org: \(organization)\nEmail: fixture@example.com\u{1b}[0m"

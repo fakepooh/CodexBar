@@ -8,7 +8,7 @@ let useLocalSweetCookieKit =
 let sweetCookieKitDependency: Package.Dependency =
     useLocalSweetCookieKit && FileManager.default.fileExists(atPath: sweetCookieKitPath)
     ? .package(path: sweetCookieKitPath)
-    : .package(url: "https://github.com/steipete/SweetCookieKit", from: "0.5.5")
+    : .package(url: "https://github.com/steipete/SweetCookieKit", from: "0.5.11")
 
 let sqlite3LibDir = ProcessInfo.processInfo.environment["CODEXBAR_SQLITE3_LIB_DIR"]?
     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -44,10 +44,10 @@ let package = Package(
         return products
     }(),
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
-        .package(url: "https://github.com/steipete/Commander", from: "0.2.4"),
-        .package(url: "https://github.com/apple/swift-crypto.git", from: "4.5.2"),
-        .package(url: "https://github.com/apple/swift-log", from: "1.15.1"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.1"),
+        .package(url: "https://github.com/steipete/Commander", from: "0.3.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", "4.5.2"..<"6.0.0"),
+        .package(url: "https://github.com/apple/swift-log", from: "1.16.2"),
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "3.1.0"),
         .package(url: "https://github.com/zats/Vortex", revision: "ef5392088d4aeb255c4eee83157dbdafcd31bf07"),
         sweetCookieKitDependency,
@@ -101,7 +101,10 @@ let package = Package(
                 swiftSettings: [
                     .enableUpcomingFeature("StrictConcurrency"),
                 ],
-                linkerSettings: sqlite3LinkerSettings),
+                linkerSettings: sqlite3LinkerSettings + [
+                    // musl's default thread stack is too small for synchronous Swift cost scans.
+                    .unsafeFlags(["-Xlinker", "-z", "-Xlinker", "stack-size=8388608"], .when(platforms: [.linux])),
+                ]),
             // Crash-test subprocess: tests SIGKILL it mid-save to prove the cost store's
             // save cycle is atomic. Not shipped; built only as a test dependency.
             .executableTarget(
@@ -207,6 +210,9 @@ let package = Package(
                 name: "CodexBarWidget",
                 dependencies: ["CodexBarCore"],
                 path: "Sources/CodexBarWidget",
+                resources: [
+                    .process("Resources"),
+                ],
                 swiftSettings: [
                     .enableUpcomingFeature("StrictConcurrency"),
                 ]),

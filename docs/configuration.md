@@ -9,6 +9,7 @@ read_when:
 # Configuration
 
 The app's **Help → CodexBar Help** command opens the [README](https://github.com/steipete/CodexBar/blob/main/README.md), including setup instructions and links to provider documentation.
+**Settings → About → Website** opens the project website at [codexbar.app](https://codexbar.app).
 
 The app and CLI share one JSON file for API keys, manual cookie headers, source selection, provider ordering, and token accounts. The running app detects external edits, atomic replacements, and restored older contents, including during watcher startup and change callbacks. App writes update the baseline without being treated as external edits.
 Keychain holds runtime cookie caches, browser Safe Storage access, and provider OAuth/device-flow credentials where required.
@@ -52,6 +53,9 @@ replaced by `loadOrCreateDefault()`.
 }
 ```
 
+`shareUsageWithCLI` (optional boolean, default off) lets `codexbar usage` fall back to the app's cached numbers in SSH
+sessions; see [CLI](cli.md#ssh-sessions-macos).
+
 ## External event hooks
 
 Hooks are local, explicit opt-in automation. Configure them in Settings > Hooks or in this local config file; no
@@ -85,6 +89,10 @@ between `0.1` and `300`. Hook processes receive only a small allowlist of genera
 event's `CODEXBAR_*` variables; CodexBar provider keys and tokens are not inherited. The same event is also encoded as
 JSON on stdin. Only configure executables you trust.
 
+Installed user plugins can be selected by manifest ID (or by an any-provider rule). Their successful, current app
+refreshes support `usage_updated`, `quota_low`, `quota_reached`, and `quota_reset` through the same command and payload
+contract. See [plugin hooks](plugins.md#external-hooks) for window semantics and lifecycle behavior.
+
 Events:
 
 - `quota_low`: a quota lane crosses the rule's `threshold` upward. Thresholds are usage fractions greater than `0`
@@ -96,6 +104,8 @@ Events:
   successful poll. It can fire when values are unchanged. `usagePercent`, `windowMinutes`, and `resetAt`
   describe the positional primary window; `secondaryUsagePercent`, `secondaryWindowMinutes`, and
   `secondaryResetAt` describe the positional secondary window. Synthetic placeholder windows are omitted.
+  When the provider reported a raw plan identifier, the event also carries `plan`, `planSource`, and
+  `planObservedAt` as described below.
 - `provider_unavailable`: a provider status changes to a minor, major, or critical outage.
 - `provider_recovered`: that tracked outage returns to normal.
 - `refresh_failed`: a provider refresh fails; `CODEXBAR_STATUS` is a coarse category such as `timeout`, `offline`,
@@ -113,6 +123,20 @@ Payload environment variables are `CODEXBAR_EVENT`, `CODEXBAR_PROVIDER`, `CODEXB
 `CODEXBAR_WINDOW_MINUTES`, `CODEXBAR_RESET_AT`, `CODEXBAR_SECONDARY_USAGE_PERCENT`,
 `CODEXBAR_SECONDARY_WINDOW_MINUTES`, `CODEXBAR_SECONDARY_RESET_AT`, and `CODEXBAR_STATUS`. Enabling Hide personal info
 omits `CODEXBAR_ACCOUNT` and the matching JSON field.
+
+`usage_updated` can also carry sampled plan provenance. The fields are omitted entirely when the provider did not
+report a raw identifier:
+
+- `plan` (`CODEXBAR_PLAN`): the provider's raw plan/tier identifier, for example `pro`. It is not the display label
+  (`Pro 20x`) and it does not establish an allowance multiplier, baseline, or quota window.
+- `planSource` (`CODEXBAR_PLAN_SOURCE`): the provider surface that reported it. Current values are `usage_response`
+  (provider usage/rate-limit response), `oauth_claims` (OAuth ID-token claims), `pat_whoami` (token-auth whoami
+  response), and `local_rpc` (local Codex app-server response).
+- `planObservedAt` (`CODEXBAR_PLAN_OBSERVED_AT`): when CodexBar observed the value, not when the plan took effect.
+
+Only Codex currently reports raw plan identifiers. Display labels, pricing, and web-dashboard values are never
+promoted to these fields. `usage_updated` is throttled to one matching attempt per 600 seconds per account with no trailing
+delivery, so the fields describe a sampled observation rather than a complete plan transition history.
 
 The stdin JSON uses the same camel-case field names without the `CODEXBAR_` prefix. Dates are UTC ISO 8601 strings,
 usage percentages are `0...1` fractions, unavailable optional fields are omitted rather than encoded as `null`, and
@@ -146,9 +170,19 @@ All provider fields are optional unless noted.
 - `region`: provider-specific region (e.g. `zai`, `minimax`). Kimi accepts `china` (default, `kimi.com`) or `international` (`kimi.ai`); see [Kimi setup](kimi.md). This selects API, web, cookie discovery, and dashboard hosts. Automatic CLI credential reuse is limited to China because the credential file has no issuing-host metadata.
 - `workspaceID`: provider-specific workspace/deployment/project ID (e.g. Azure OpenAI deployment, OpenAI API project,
   `opencode`, Notion space).
+- `modelRateLimits`: optional per-model organization rate limits for the provider-level key (`apiKey` or environment
+  key), currently used by OpenAI Live Usage. Token accounts never inherit these limits.
+  Each row has `model`, positive integer `tokensPerMinute`, and optional positive integer `requestsPerMinute`.
+  Model IDs are trimmed; empty IDs and non-positive TPM rows are dropped, non-positive RPM becomes absent,
+  and the last valid row for a duplicate ID wins. Empty arrays are omitted when encoding. Only these manual limits drive
+  organization utilization; API project caps are separate context. Exact IDs match first, then the longest model
+  ID followed by a hyphen (covering dated snapshots).
+  Example: `"modelRateLimits": [{"model": "gpt-5", "tokensPerMinute": 40000000, "requestsPerMinute": 15000}]`.
 - `tokenAccounts`: multi-account tokens for providers in `TokenAccountSupportCatalog`.
 - `claudeSwapEnabled`: allow the Claude provider to read account usage from claude-swap.
-- `claudeSwapExecutablePath`: path to the `cswap` executable.
+- `claudeSwapExecutablePath`: path to the `cswap` executable, or to `tcr` when `claudeSwapSource` is `"tcr"`.
+- `claudeSwapSource`: `"claude-swap"` (default) or `"tcr"`; selects the list command (`cswap --list --json` or
+  `tcr list --json`), the card label and the `<source>:<slot>` identity. Machine-local like the executable path.
 - `claudeSwapShowSingleAccount`: prefer a claude-swap card when exactly one account is available. Defaults to
   `false`; multiple claude-swap accounts retain their existing precedence.
 
@@ -179,6 +213,12 @@ Example placeholder config:
     }
   ]
 }
+```
+
+Or write the same two fields from the CLI, which also works where the app is unavailable (for example on Linux):
+
+```bash
+pbpaste | codexbar config set-cookie --provider claude --stdin
 ```
 
 Validate after editing:
@@ -234,6 +274,29 @@ and never paste real cookie values or readable DevTools screenshots into public 
 }
 ```
 
+Each OpenAI token account can store `tokenAccounts.accounts[].modelRateLimits`: omitted means not set; `[]` means
+explicitly no limits (kept so clears sync and older CodexBar versions cannot erase limits during sync). Rows use
+the same validation as provider-level `modelRateLimits`. Limits belong only to that account; there is no
+inheritance. Settings edits the selected account's limits, and switching accounts switches the list.
+
+```json
+{
+  "id": "openai",
+  "modelRateLimits": [{"model": "gpt-5", "tokensPerMinute": 40000000}],
+  "tokenAccounts": {
+    "version": 1,
+    "activeIndex": 0,
+    "accounts": [{
+      "id": "00000000-0000-0000-0000-000000000001",
+      "label": "Other organization",
+      "token": "<OPENAI_ADMIN_KEY>",
+      "addedAt": 1735123456,
+      "modelRateLimits": [{"model": "gpt-5", "tokensPerMinute": 80000000}]
+    }]
+  }
+}
+```
+
 z.ai team accounts also use `usageScope`, `organizationId`, and `workspaceID`; see [z.ai](zai.md).
 
 ## Provider IDs
@@ -241,7 +304,9 @@ z.ai team accounts also use `usageScope`, `organizationId`, and `workspaceID`; s
 See the [generated provider ID list](provider-ids.md), sourced from `UsageProvider` in enum order.
 
 ## Ordering
-The order of `providers` controls display/order in the app and CLI. Reorder the array to change ordering.
+The order of `providers` controls display/order in the app and CLI. Reorder the array to change ordering. The Settings sidebar also supports dragging providers to reorder them.
+Its Undo banner dismisses after four seconds of inactivity. Hovering, keyboard focus, or VoiceOver focus pauses
+the timer, and a new reorder restarts it. Reduce Motion disables the fade animation.
 
 ## iCloud sync
 The three sync sub-options are disabled while the main sync switch is off, iCloud is unavailable, or a newer app version is required. Their saved choices are retained when sync is turned off and restored when it is enabled again.
@@ -252,18 +317,24 @@ Opt-in (Settings → iCloud Sync, off by default; requires a signed release buil
 - **A curated preferences subset** — notification/threshold/display settings.
 - **Usage snapshots** — per-device current usage per account, so other Macs can show last-known data ("via <Mac> · 1h ago") and accounts discovered on other Macs.
 
+A dropped account-snapshot upload can be retried by a later push without restarting CodexBar. Delayed results from an older upload cannot mark newer snapshot data as uploaded.
+
+With Usage snapshots and Show accounts from other Macs enabled, an enabled provider without local usage can also use the freshest fleet fallback in separate, current-selection, highest-usage, and stacked menu bar icons. The menu labels its source and age; accessibility help includes the source Mac and capture time, respecting Hide personal info. Local snapshots remain authoritative. Fleet account deduplication uses only that provider's local identities; another provider's CLI login does not hide a synced account. Remote usage does not enable local credential-dependent fetches or populate local costs, pace, credits, or account labels. Highest usage compares the same presentation snapshots without enabling local fetches. Fleet refreshes preserve an open menu's provider switcher until the menu is closed and reopened.
+
 The **Macs** list offers **Remove** for other devices, including stale duplicates left after a reinstall. Removal deletes that device record and its cached usage snapshots from iCloud; it leaves shared settings, credentials, and this Mac intact. Sync must be enabled and available. Failed removals remain visible and report a sync error. A Mac still running CodexBar with sync enabled can publish its records again: if a save finds that its previous record was deleted, it drops the stale server version and retries with a fresh record. If that fresh record is also reported missing, CodexBar surfaces the error instead of retrying indefinitely.
 
 Automatic reception of changes requires a release signed with the macOS Push Notifications entitlement. When that capability is present, enabling sync registers for silent remote notifications; CKSyncEngine manages the CloudKit database subscription. The existing launch, foreground, and 15-minute fetch requests remain, but are not a guarantee of prompt delivery without push support. See [release setup](RELEASING.md#icloud-sync-cloudkit).
 
 Fetched records and removed-record recovery apply together with their local sync bookkeeping. Cancelling sync, turning it off, or accepting a newer batch prevents a suspended older apply from overwriting provider settings, preferences, or fleet records.
 
-Never synced, by design: `hooks` (sync payloads structurally cannot create or modify hook rules — they execute local binaries), machine-local paths (`claudeSwapExecutablePath`, `codexProfileHomePaths`, `awsProfile`/`awsAuthMode`, `source`, `codexActiveSource`, `cookieSource`), menu-bar layout/geometry, debug settings, usage history, and cost ledgers. A provider is never auto-enabled on a Mac where its required local CLI is missing. Records carry a schema version; older app versions pause sync instead of rewriting newer payloads. The CLI does not talk to CloudKit — the running app watches `config.json`, applies CLI or hand edits locally, and syncs changed provider payloads to the fleet when iCloud sync is enabled. Remote changes written to the file are recognized as app writes and are not echoed back. The app tracks per-provider dirty state and never re-uploads unchanged state at launch.
+Never synced, by design: `hooks` (sync payloads structurally cannot create or modify hook rules — they execute local binaries), machine-local paths (`claudeSwapExecutablePath`, `claudeSwapSource`, `codexProfileHomePaths`, `awsProfile`/`awsAuthMode`, `source`, `codexActiveSource`, `cookieSource`), menu-bar layout/geometry, debug settings, usage history, and cost ledgers. A provider is never auto-enabled on a Mac where its required local CLI is missing. Records carry a schema version; older app versions pause sync instead of rewriting newer payloads. The CLI does not talk to CloudKit — the running app watches `config.json`, applies CLI or hand edits locally, and syncs changed provider payloads to the fleet when iCloud sync is enabled. Remote changes written to the file are recognized as app writes and are not echoed back. The app tracks per-provider dirty state and never re-uploads unchanged state at launch.
 
 ## Notes
 - Fields not relevant to a provider are ignored.
 - Omitted providers are appended with defaults during normalization.
 - Unknown or retired provider entries are retained with all their fields, settings, and secrets in their original array positions during unrelated saves. This also applies when plugin discovery fails or the plugin runtime is unavailable. `config providers` labels unavailable entries as `plugin (not loaded)`; `config dump` includes them but redacts their opaque fields unless `--show-secrets` is explicitly requested. Remove plugin data through explicit plugin deletion, or remove the entry by editing the file.
+- When a configuration read reports an error, CodexBar preserves `config.json` during startup and later settings saves. At startup it uses temporary defaults without clearing legacy credentials; repair the file and let CodexBar reload it, or remove it and restart, before saving settings. Temporary defaults and earlier queued or staged saves cannot overwrite the repaired file after a reload. Legacy migration retries on the next launch.
+- Reloading account settings from disk reloads the complete config, preserving unrelated edits. A failed config reload, plugin-settings read, or save-time config validation blocks saving until a valid full reload succeeds.
 - Keep the file private; it contains secrets.
 - Validate the file with `codexbar config validate` (JSON output available with `--format json`).
 
@@ -308,7 +379,8 @@ and notification windows; sound, on-screen alerts and threshold markers; pace vi
 and tick appearance; usage/reset display; local cost display, comparisons and summary style; privacy,
 blink/confetti effects, highest-usage selection, optional credits/extra usage, changelog links, currency
 and alphabetical provider sorting. JSON keys match the `SyncedPreferences` fields. It additionally includes
-`limitResetNotificationsEnabled`, `mergeIcons`, `mergeIconsStacked`, `switcherShowsIcons`, `mergedOverviewLayout`,
+`limitResetNotificationsEnabled`, `upcomingResetNotificationsEnabled`, `mergeIcons`, `mergeIconsStacked`, `switcherShowsIcons`,
+`mergedOverviewLayout`,
 `mergedOverviewSelectedProviders`, and `switcherShortcuts`. An overview selection is applied intentionally
 to the receiving Mac's active providers, including an empty selection. `weeklyProgressWorkDays: null`
 restores the seven-day default. Missing keys leave the receiving Mac's settings unchanged. Unknown preference keys,
@@ -316,10 +388,40 @@ unsupported versions, invalid types and invalid shortcut mappings are rejected b
 
 Credentials, accounts, hooks, launch at login, global hotkeys, local paths, device identity, iCloud switches,
 debug settings, and consent are excluded. Import does not enable activity-scan consent. Only the existing
-iCloud projection syncs onward; reset notifications, the additional menu settings, and switcher shortcuts stay local
+iCloud projection syncs onward; reset and upcoming-reset notifications, the additional menu settings, and switcher
+shortcuts stay local
 unless explicitly exported and imported. Import does not modify `config.json` or iCloud's remote-update suppression.
 
 ### Menu bar controls
+
+**Settings → Menu Bar → Show all accounts in Overview** is off by default. When enabled, each selected
+multi-account provider expands into account rows labeled with its account name or email. The provider’s
+current account source stays in use: claude-swap/tcr, managed Codex accounts, or saved token accounts,
+independently of the provider tab’s stacked/segmented layout. The six-provider cap, provider order, and
+Overview selection still apply to providers before expansion; account rows do not use extra provider
+slots. Rows keep each account’s cached usage and errors; missing usage stays unavailable instead of
+borrowing another account’s quota. The setting adds no fetches and does not change refresh limits.
+Clicking a row opens its provider tab without selecting another credential. The local additive defaults
+key is `mergedOverviewAllAccounts`; older versions ignore it.
+
+**Auto** ranks each provider's eligible quota windows from the current snapshot. An exhausted quota comes
+first; otherwise a supported lane’s pace forecast that runs out before reset takes priority, with the shortest time to
+depletion first. Without such a forecast, Auto chooses the highest used percentage. Ties keep provider order.
+The unified highest-usage icon uses the same priority for providers set to Auto and displays the selected
+window's actual percentage. Explicit metric choices and provider-specific credit-pool ordering are preserved.
+This uses reported usage, duration, and reset time; it adds no observation history or background timer.
+
+The **Layout** editor applies only to **Icon & percent**. With **Critters** or **Meter bars** selected, its footer explains which style to choose before editing.
+
+The layout editor includes an optional **Tokens / min** value token (for example `49M/min`) using the provider’s latest reported complete minute. OpenAI supplies it through the **Tokens per minute** provider setting. It uses the same unavailable placeholder as other value tokens when no throughput is available. The optional **Tokens / min graph** token shows the last hour as a compact graph, using the maximum minute in each column and excluding minutes that are still reporting. Drag either token into your layout to enable it; default layouts include neither. The graph uses the status item’s own provider data and the standard unavailable placeholder when there are no reported minutes.
+
+Switching from **Icon & percent** back to **Meters** or **Critters** redraws the selected style immediately, even when usage has not changed.
+
+Custom two-line layouts show a single leading provider icon at full size beside both text rows. Merged-provider rows, multiple icons, icon-only rows, high-contrast mode, and provider-colored layouts retain inline icons.
+
+The layout editor's **Usage** palette includes graphical bars for session, weekly, scoped weekly, and automatic windows. **Progress bars stacked** places session and weekly bars on separate rows with their reset countdowns. Bars follow the used/remaining display preference and keep balance-only automatic values as text. The compact three-character **Usage bar** remains available.
+
+Older app versions show matching percentages in place of graphical bars. Returning to the newer version restores the bars when the older layout was unchanged; edits made in the older version take precedence.
 
 **Surprise me** is disabled while brand icons are selected, and static brand layouts do not run the blink timer.
 Your animation preference is kept for switching back to critters. If a brand image is unavailable and the legacy

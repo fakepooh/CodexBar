@@ -25,12 +25,23 @@ struct CostUsageCoverageCompatibilityTests {
         }
     }
 
-    @Test(arguments: ["c6c46a376ba16304", "55f640e6bb0ccba4", "98de5f52231e524e", "04a6361469a4ff77"])
-    func `reviewed predecessors retain actual previous report payloads without rebuilding`(hash: String) async throws {
+    @Test(arguments: [
+        "0d8f9504f8e63d0f",
+        "c0f8e9be04d824c2",
+        "89c0662767e633ea",
+        "e1088fb29c221187",
+        "7ff985e81e281a11",
+        "c6c46a376ba16304",
+        "55f640e6bb0ccba4",
+        "98de5f52231e524e",
+        "04a6361469a4ff77",
+    ])
+    func `predecessor report encoding remains readable while stale totals are discarded`(hash: String) async throws {
         let env = try CostUsageTestEnvironment()
         defer { env.cleanup() }
         let predecessor = CostUsageStore(
             cacheRoot: env.cacheRoot,
+            home: env.codexStoreHome,
             schemaVersion: CostUsageStore.combinedSchemaVersion(
                 base: CostUsageStore.baseSchemaVersion,
                 parserHash: hash),
@@ -45,12 +56,12 @@ struct CostUsageCoverageCompatibilityTests {
         var metadata = await predecessor.fetchMetadata()
         metadata.previousReportPayload = payload
         #expect(await predecessor.setMetadata(metadata))
-        let current = CostUsageStore(cacheRoot: env.cacheRoot)
+        let current = CostUsageStore(cacheRoot: env.cacheRoot, home: env.codexStoreHome)
         let adopted = await current.fetchMetadata()
-        #expect(adopted.previousReportPayload == payload)
+        #expect(adopted.previousReportPayload == nil)
         #expect(await current.rebuildCount == 0)
         let retained = try JSONDecoder().decode(
-            CostUsageCodexPreviousReport.self, from: #require(adopted.previousReportPayload))
+            CostUsageCodexPreviousReport.self, from: payload)
         #expect(retained.report.data.first?.pricedRequestCount == nil)
         #expect(retained.report.data.first?.coverageCounts.priced == 1)
         #expect(retained.report.data.first?.costUSD == 12)
