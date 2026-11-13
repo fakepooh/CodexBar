@@ -1,11 +1,57 @@
 import Foundation
+import Testing
+@testable import CodexBarCore
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-import Testing
-@testable import CodexBarCore
 
 extension ProviderPluginRuntimeTests {
+    @Test(arguments: Self.labelValidationEngines)
+    func `standard plugin windows retain validated titles and reset metadata`(
+        engine: ProviderPluginEngineKind) async throws
+    {
+        let runtime = try ProviderPluginRuntime(source: Self.plugin(fetchBody: """
+        return {
+          primary: { title: "  Requests  ", usedPercent: 25, windowMinutes: 300,
+                     resetsAt: "2030-01-01T01:00:00Z", resetDescription: "at midnight" },
+          secondary: { title: "  ", usedPercent: 50 },
+          tertiary: { title: "Credits", usedPercent: 75 }
+        };
+        """), engine: engine)
+        let snapshot = try await runtime.fetchUsage(secrets: ["TEST_KEY": "fixture"])
+        let primary = try #require(snapshot.primary)
+        #expect(primary.title == "Requests")
+        #expect(primary.windowMinutes == 300)
+        #expect(primary.resetsAt != nil)
+        #expect(primary.resetDescription == "at midnight")
+        #expect(snapshot.secondary?.title == nil)
+        #expect(snapshot.tertiary?.title == "Credits")
+        let decoded = try JSONDecoder().decode(RateWindow.self, from: JSONEncoder().encode(primary))
+        #expect(decoded == primary)
+        let current = RateWindow(
+            usedPercent: 30,
+            windowMinutes: nil,
+            resetsAt: nil,
+            resetDescription: nil,
+            title: "Current title")
+        #expect(current.backfillingResetTime(from: primary, now: .distantPast).title == "Current title")
+        let old = try JSONDecoder().decode(RateWindow.self, from: Data(#"{"usedPercent":20}"#.utf8))
+        #expect(old.title == nil)
+    }
+
+    @Test(arguments: Self.labelValidationEngines)
+    func `standard plugin window titles reject nonstrings and oversized labels`(
+        engine: ProviderPluginEngineKind) async throws
+    {
+        for value in ["42", "{}", "'é'.repeat(129)"] {
+            let runtime = try ProviderPluginRuntime(source: Self.plugin(fetchBody:
+                "return {primary:{usedPercent:20,title:\(value)}};"), engine: engine)
+            await #expect(throws: ProviderPluginError.self) {
+                try await runtime.fetchUsage(secrets: ["TEST_KEY": "fixture"])
+            }
+        }
+    }
+
     @Test(arguments: Self.labelValidationEngines)
     func `negative big integers wrap at limb boundaries`(engine: ProviderPluginEngineKind) async throws {
         let runtime = try ProviderPluginRuntime(source: Self.plugin(fetchBody: """
@@ -259,7 +305,10 @@ struct ProviderPluginRuntimeTests {
             const response = await ctx.http.getJSON("https://api.example.test/maximum", { timeoutSeconds: 90 });
             return { primary: { usedPercent: response.json.used } };
             """),
+            resourceBundle: CodexBarCoreResources.bundle,
             transport: Self.transport(recorder: requests, body: #"{"used":11}"#),
+            timeout: BundledPluginTestSupport.timeout,
+            contextOptions: BundledPluginTestSupport.contextOptions,
             engine: engine)
 
         let snapshot = try await runtime.fetchUsage(secrets: ["TEST_KEY": "secret-value"])
@@ -288,35 +337,36 @@ struct ProviderPluginRuntimeTests {
     @Test
     func `HTTP request deadline cancels a transport that exceeds it`() async throws {
         let cancellation = TransportCancellationProbe()
+        let (starts, started) = AsyncStream<Void>.makeStream()
+        defer { started.finish() }
         let runtime = try ProviderPluginRuntime(
             source: Self.plugin(fetchBody: """
             await ctx.http.getJSON("https://api.example.test/slow", { timeoutSeconds: 1 });
             return { primary: { usedPercent: 1 } };
             """),
-            transport: ProviderHTTPTransportHandler { request in
-                do {
-                    try await Task.sleep(for: .seconds(5))
-                } catch is CancellationError {
-                    await cancellation.markCancelled()
-                    throw CancellationError()
-                }
-                let response = try #require(HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: 200,
-                    httpVersion: nil,
-                    headerFields: ["Content-Type": "application/json"]))
-                return (Data(#"{"used":1}"#.utf8), response)
-            })
+            resourceBundle: CodexBarCoreResources.bundle,
+            transport: ProviderHTTPTransportHandler { _ in
+                started.yield()
+                let (pending, release) = AsyncStream<Void>.makeStream()
+                defer { release.finish() }
+                for await _ in pending {}
+                #expect(Task.isCancelled)
+                await cancellation.markCancelled()
+                throw CancellationError()
+            },
+            timeout: 300,
+            contextOptions: ProviderPluginContextOptions(
+                optionalRequestTimeoutSeconds: nil,
+                waitForHTTPDeadline: { _, budget in
+                    #expect(budget == .seconds(1))
+                    var iterator = starts.makeAsyncIterator()
+                    #expect(await iterator.next() != nil)
+                }))
 
-        do {
-            _ = try await runtime.fetchUsage(secrets: ["TEST_KEY": "secret-value"])
-            Issue.record("Expected the request deadline to reject the plugin fetch")
-        } catch let error as URLError {
-            #expect(error.code == .timedOut)
-            await cancellation.waitUntilCancelled()
-        } catch {
-            Issue.record("Unexpected error: \(error)")
+        await #expect(throws: URLError(.timedOut)) {
+            try await runtime.fetchUsage(secrets: ["TEST_KEY": "secret-value"])
         }
+        await cancellation.waitUntilCancelled()
     }
 
     @Test
@@ -877,7 +927,7 @@ extension ProviderPluginRuntimeTests {
         }
     }
 
-    @Test
+    @Test(.timeLimit(.minutes(1)))
     func `hung script times out and next fetch uses a fresh context`() async throws {
         let runtime = try ProviderPluginRuntime(
             source: Self.plugin(fetchBody: """
@@ -889,14 +939,10 @@ extension ProviderPluginRuntimeTests {
             """),
             timeout: 5,
             engine: .quickJS)
-        let start = Date()
 
         await #expect(throws: ProviderPluginError.timedOut) {
             _ = try await runtime.fetchUsage(secrets: ["TEST_KEY": "hang"])
         }
-        // This ceiling only proves the watchdog interrupted the infinite loop instead of hanging
-        // forever. The runtime timeout itself leaves fresh-worker compilation ample scheduler headroom.
-        #expect(Date().timeIntervalSince(start) < 30)
 
         let recovered = try await runtime.fetchUsage(secrets: ["TEST_KEY": "ok"])
         #expect(recovered.primary?.usedPercent == 7)

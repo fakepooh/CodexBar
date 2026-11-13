@@ -476,6 +476,8 @@ final class QuickJSProviderPluginEngine: ProviderPluginEngine, @unchecked Sendab
             env,
             "timeZone",
             self.makeString(quickJSNormalizedTimeZoneIdentifier(timeZone)))
+        _ = JS_SetPropertyStr(self.context, env, "supportsIconProvider", JS_NewBool(self.context, true))
+        _ = JS_SetPropertyStr(self.context, env, "supportsMenuBarItems", JS_NewBool(self.context, true))
         _ = JS_SetPropertyStr(self.context, ctx, "env", env)
 
         let preparedContext = try self.call(applyPrelude, arguments: [ctx, host])
@@ -1057,7 +1059,7 @@ private final class QuickJSSerialWorker: @unchecked Sendable {
         override func main() {
             defer { self.state.markStopped() }
             while let job = self.state.next() {
-                job()
+                autoreleasepool { job() }
             }
         }
     }

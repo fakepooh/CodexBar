@@ -158,5 +158,15 @@ Copy each value once, on one line. Multi-line or duplicated IDs can make the API
 - `Sources/CodexBarCore/Resources/Plugins/zai.js` (quota parsing and window mapping)
 - `Sources/CodexBarCore/Providers/Zai/ZaiProviderDescriptor.swift`
 - `Sources/CodexBarCore/Providers/Zai/ZaiSettingsReader.swift`
-- `Sources/CodexBar/ZaiTokenStore.swift` (legacy migration helper)
+- `Sources/CodexBar/Providers/Zai/ZaiTokenStore.swift` (legacy migration helper)
 - `Tests/CodexBarTests/ProviderPluginDetailsParityTests.swift` (quota fixtures, including credit limits)
+
+## Prepaid-only accounts
+
+BigModel CN personal accounts without a Coding Plan can report their prepaid CNY balance using the same API key.
+When the quota endpoint explicitly reports no Coding Plan, CodexBar reads the existing account-balance endpoint
+and shows a balance-only snapshot. If that lookup fails, the provider remains unavailable. Other quota errors
+retain their normal failure behavior. International z.ai balances remain unsupported until an endpoint is verified.
+
+The **Balance** menu-bar element uses the account balance. Automatic text also uses it for balance-only accounts;
+accounts with subscription quotas keep their quota percentage alongside the optional Balance element.

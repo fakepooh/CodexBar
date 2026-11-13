@@ -10,7 +10,7 @@ struct ReplicateResolvedSession: Sendable {
 
 struct ReplicateWebFetchStrategy: ProviderFetchStrategy {
     typealias UsageLoader = @Sendable (String) async throws -> UsageSnapshot
-    typealias SessionLoader = @Sendable (BrowserDetection) throws -> [ReplicateResolvedSession]
+    typealias SessionLoader = @Sendable (BrowserDetection) throws -> AnySequence<ReplicateResolvedSession>
     typealias CacheObservation = CookieHeaderCache.ConditionalMutationObservation
     typealias CacheLoader = @Sendable () -> CacheObservation
     typealias CacheClearer = @Sendable (CookieHeaderCache.Entry?) -> Bool
@@ -79,7 +79,6 @@ struct ReplicateWebFetchStrategy: ProviderFetchStrategy {
         }
         try Task.checkCancellation()
         let sessions = try self.sessionLoader(context.browserDetection)
-        guard !sessions.isEmpty else { throw ReplicateCredentialError.missingCookie }
         return try await ProviderCandidateRetryRunner.run(
             sessions,
             shouldRetry: Self.isAuthenticationFailure,
@@ -98,12 +97,19 @@ struct ReplicateWebFetchStrategy: ProviderFetchStrategy {
         (error as? ProviderFetchClassifiedError)?.kind == .authenticationExpired
     }
 
-    private static func fetchUsage(cookieHeader: String) async throws -> UsageSnapshot {
+    /// Reuse connections without retaining cookies, credentials, or responses between account refreshes.
+    static let usageSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
-        let session = ProviderHTTPClient.redirectGuardedSession(configuration: configuration)
-        defer { session.invalidateAndCancel() }
+        return ProviderHTTPClient.redirectGuardedSession(configuration: configuration)
+    }()
+
+    private static func fetchUsage(cookieHeader: String) async throws -> UsageSnapshot {
+        let session = Self.usageSession
         let runtime = try ProviderPluginRuntime(
             bundledPlugin: "replicate",
             transport: ProviderHTTPClient(session: session))
@@ -115,11 +121,12 @@ struct ReplicateWebFetchStrategy: ProviderFetchStrategy {
         })
     }
 
-    private static func loadSessions(browserDetection: BrowserDetection) throws -> [ReplicateResolvedSession] {
+    private static func loadSessions(browserDetection: BrowserDetection) throws
+    -> AnySequence<ReplicateResolvedSession> {
         #if os(macOS)
-        try ReplicateCookieImporter.importSessions(browserDetection: browserDetection).map {
+        try AnySequence(ReplicateCookieImporter.sessionCandidates(browserDetection: browserDetection).lazy.map {
             ReplicateResolvedSession(cookieHeader: $0.cookieHeader, sourceLabel: $0.sourceLabel)
-        }
+        })
         #else
         throw ReplicateCredentialError.missingCookie
         #endif

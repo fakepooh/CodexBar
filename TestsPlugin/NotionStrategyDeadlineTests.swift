@@ -130,7 +130,7 @@ struct NotionStrategyDeadlineTests {
         handler: @escaping @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)) throws -> ScriptFetchStrategy
     {
         var options = ProviderPluginContextOptions.production
-        options.waitForRuntimeDeadline = { await clock.sleep(seconds: $0) }
+        options.waitForFetchDeadline = { await clock.sleep(seconds: $0) }
         let strategy = NotionProviderDescriptor.webStrategy(
             timeout: timeout, transport: ProviderHTTPTransportHandler(handler))
         _ = try strategy.loadedRuntime(contextOptions: options, engine: engine)

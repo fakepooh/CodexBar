@@ -488,8 +488,7 @@ struct CodexOAuthTests {
 
         let result = try CodexOAuthFetchStrategy._mapResultForTesting(
             Data(json.utf8),
-            credentials: creds,
-            sourceMode: .auto)
+            credentials: creds)
 
         #expect(result.usage.primary == nil)
         #expect(result.usage.secondary?.usedPercent == 43)
@@ -523,8 +522,7 @@ struct CodexOAuthTests {
 
         let result = try CodexOAuthFetchStrategy._mapResultForTesting(
             Data(json.utf8),
-            credentials: creds,
-            sourceMode: .oauth)
+            credentials: creds)
 
         #expect(result.usage.primary == nil)
         #expect(result.usage.secondary?.usedPercent == 43)
@@ -558,8 +556,7 @@ struct CodexOAuthTests {
 
         let result = try CodexOAuthFetchStrategy._mapResultForTesting(
             Data(json.utf8),
-            credentials: creds,
-            sourceMode: .auto)
+            credentials: creds)
 
         #expect(result.usage.primary?.usedPercent == 18)
         #expect(result.usage.primary?.windowMinutes == 300)
@@ -593,8 +590,7 @@ struct CodexOAuthTests {
 
         let result = try CodexOAuthFetchStrategy._mapResultForTesting(
             Data(json.utf8),
-            credentials: creds,
-            sourceMode: .auto)
+            credentials: creds)
 
         #expect(result.usage.primary == nil)
         #expect(result.usage.secondary?.usedPercent == 43)
@@ -628,8 +624,7 @@ struct CodexOAuthTests {
 
         let result = try CodexOAuthFetchStrategy._mapResultForTesting(
             Data(json.utf8),
-            credentials: creds,
-            sourceMode: .oauth)
+            credentials: creds)
 
         #expect(result.usage.primary == nil)
         #expect(result.usage.secondary?.usedPercent == 43)
@@ -723,8 +718,7 @@ struct CodexOAuthTests {
 
         let result = try CodexOAuthFetchStrategy._mapResultForTesting(
             Data(json.utf8),
-            credentials: creds,
-            sourceMode: .auto)
+            credentials: creds)
 
         #expect(result.usage.primary == nil)
         #expect(result.usage.secondary == nil)
@@ -864,5 +858,112 @@ struct CodexOAuthTests {
         let config = "chatgpt_base_url = \"https://chat.openai.com\"\n"
         let url = CodexOAuthUsageFetcher._resolveUsageURLForTesting(configContents: config)
         #expect(url.absoluteString == "https://chat.openai.com/backend-api/wham/usage")
+    }
+}
+
+extension CodexOAuthTests {
+    @Test
+    func `O auth usage response plan wins provenance over token claims`() throws {
+        let json = """
+        {
+          "plan_type": "pro",
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 12,
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          }
+        }
+        """
+        let credentials = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: Self.fixtureJWT(claims: [
+                "https://api.openai.com/auth": ["chatgpt_plan_type": "plus"],
+            ]),
+            accountId: nil,
+            lastRefresh: nil)
+
+        let snapshot = try #require(try CodexOAuthFetchStrategy._mapUsageForTesting(
+            Data(json.utf8),
+            credentials: credentials))
+        let observation = try #require(snapshot.planObservation)
+
+        #expect(observation.rawPlan == "pro")
+        #expect(observation.source == .usageResponse)
+        // Only the provider's raw identifier is exposed; the "Pro 20x" display mapping is not.
+        #expect(observation.rawPlan != "Pro 20x")
+        #expect(snapshot.loginMethod(for: .codex) == "pro")
+    }
+
+    @Test
+    func `O auth token claims supply provenance when the usage response omits a plan`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 12,
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          }
+        }
+        """
+        let credentials = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: Self.fixtureJWT(claims: ["chatgpt_plan_type": "plus"]),
+            accountId: nil,
+            lastRefresh: nil)
+
+        let snapshot = try #require(try CodexOAuthFetchStrategy._mapUsageForTesting(
+            Data(json.utf8),
+            credentials: credentials))
+        let observation = try #require(snapshot.planObservation)
+
+        #expect(observation.rawPlan == "plus")
+        #expect(observation.source == .oauthClaims)
+        #expect(snapshot.loginMethod(for: .codex) == "plus")
+    }
+
+    @Test
+    func `O auth snapshot omits plan provenance when no source reports a plan`() throws {
+        let json = """
+        {
+          "rate_limit": {
+            "primary_window": {
+              "used_percent": 12,
+              "reset_at": 1766948068,
+              "limit_window_seconds": 18000
+            }
+          }
+        }
+        """
+        let credentials = CodexOAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            idToken: nil,
+            accountId: nil,
+            lastRefresh: nil)
+
+        let snapshot = try #require(try CodexOAuthFetchStrategy._mapUsageForTesting(
+            Data(json.utf8),
+            credentials: credentials))
+
+        #expect(snapshot.planObservation == nil)
+    }
+
+    private static func fixtureJWT(claims: [String: Any]) -> String {
+        func base64URL(_ data: Data) -> String {
+            data.base64EncodedString()
+                .replacingOccurrences(of: "=", with: "")
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+        }
+
+        let header = (try? JSONSerialization.data(withJSONObject: ["alg": "none"])) ?? Data()
+        let payload = (try? JSONSerialization.data(withJSONObject: claims)) ?? Data()
+        return "\(base64URL(header)).\(base64URL(payload))."
     }
 }

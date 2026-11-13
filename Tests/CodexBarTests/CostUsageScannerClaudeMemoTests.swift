@@ -181,7 +181,7 @@ struct CostUsageScannerClaudeMemoTests {
         #expect(metrics == CostUsageScanner.ClaudeScanWorkMetrics())
     }
 
-    @Test(arguments: [nil, 0, 4, 5, CostUsageClaudeReportMemo.reportSemanticsVersion + 1] as [Int?])
+    @Test(arguments: [nil, 0, 4, 5, 6, 7, CostUsageClaudeReportMemo.reportSemanticsVersion + 1] as [Int?])
     func `cold process rejects reports from incompatible semantics`(revision: Int?) throws {
         let env = try CostUsageTestEnvironment()
         defer { env.cleanup() }
@@ -191,7 +191,7 @@ struct CostUsageScannerClaudeMemoTests {
         let initial = self.load(day: day, options: options)
         let sourceStamp = CostUsageClaudeFileStamp.read(at: sourceURL)
         let memoURL = CostUsageClaudeReportMemo.reportMemoFileURL(cacheFileURL: self.cacheURL(env: env))
-        var envelope = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: memoURL)) as? [String: Any])
+        var envelope = try claudeMemoObjectForTesting(at: memoURL)
         envelope["reportSemanticsVersion"] = revision
         envelope["report"] = [
             "type": "codexbar-claude-report-memo", "data": [],
@@ -207,10 +207,11 @@ struct CostUsageScannerClaudeMemoTests {
         #expect(!initial.quotaSlices.isEmpty)
         #expect(restarted.hourly == initial.hourly)
         #expect(restarted.quotaSlices == initial.quotaSlices)
-        #expect(metrics.cacheDecodes == 0)
+        // Publication evicts decoded source rows; a memo miss reloads the persisted artifact once.
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 0)
         #expect(CostUsageClaudeFileStamp.read(at: sourceURL) == sourceStamp)
-        let rewritten = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: memoURL)) as? [String: Any])
+        let rewritten = try claudeMemoObjectForTesting(at: memoURL)
         #expect(rewritten["reportSemanticsVersion"] as? Int == CostUsageClaudeReportMemo.reportSemanticsVersion)
     }
 
@@ -260,7 +261,7 @@ struct CostUsageScannerClaudeMemoTests {
         let (report, metrics) = self.recordedLoad(day: day, options: options)
 
         #expect(report.summary?.totalInputTokens == 30)
-        #expect(metrics.cacheDecodes == 0)
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 1)
         #expect(metrics.cacheEncodes == 1)
     }
@@ -287,7 +288,7 @@ struct CostUsageScannerClaudeMemoTests {
         let (report, metrics) = self.recordedLoad(day: day, options: options)
 
         #expect(report.summary?.totalInputTokens == 30)
-        #expect(metrics.cacheDecodes == 0)
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 1)
         #expect(metrics.incrementalTranscriptParses == 1)
         #expect(metrics.reconciliations == 1)
@@ -318,7 +319,7 @@ struct CostUsageScannerClaudeMemoTests {
         let (report, metrics) = self.recordedLoad(day: day, options: options)
 
         #expect(report.summary?.totalInputTokens == 20)
-        #expect(metrics.cacheDecodes == 0)
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 0)
         #expect(metrics.cacheEncodes == 1)
     }
@@ -336,7 +337,7 @@ struct CostUsageScannerClaudeMemoTests {
         let (report, metrics) = self.recordedLoad(day: day, options: options)
 
         #expect(report.data.isEmpty)
-        #expect(metrics.cacheDecodes == 0)
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 0)
         #expect(metrics.cacheEncodes == 1)
     }
@@ -377,7 +378,7 @@ struct CostUsageScannerClaudeMemoTests {
         let (report, metrics) = self.recordedLoad(day: day, options: options)
 
         #expect(report.summary?.totalInputTokens == 10)
-        #expect(metrics.cacheDecodes == 0)
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 1)
         #expect(metrics.cacheEncodes == 1)
         #expect(metrics.repricedRows == 1)
@@ -417,7 +418,7 @@ struct CostUsageScannerClaudeMemoTests {
         let (repriced, metrics) = self.recordedLoad(day: day, options: options)
 
         #expect(abs((repriced.summary?.totalCostUSD ?? 0) - 0.002) < 0.000000001)
-        #expect(metrics.cacheDecodes == (cold ? 1 : 0))
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 0)
         #expect(metrics.cacheEncodes == 0)
         #expect(metrics.repricedRows == 1)
@@ -441,7 +442,7 @@ struct CostUsageScannerClaudeMemoTests {
         let (report, metrics) = self.recordedLoad(day: day, options: options)
 
         #expect(report.summary?.totalInputTokens == 10)
-        #expect(metrics.cacheDecodes == 0)
+        #expect(metrics.cacheDecodes == 1)
         #expect(metrics.transcriptParses == 1)
         #expect(metrics.cacheEncodes == 1)
     }
@@ -519,7 +520,7 @@ struct CostUsageScannerClaudeMemoTests {
         let options = self.options(env: env)
         let original = self.load(day: day, options: options)
         let memoURL = CostUsageClaudeReportMemo.reportMemoFileURL(cacheFileURL: self.cacheURL(env: env))
-        var memo = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: memoURL)) as? [String: Any])
+        var memo = try claudeMemoObjectForTesting(at: memoURL)
         var report = try #require(memo["report"] as? [String: Any])
         var days = try #require(report["data"] as? [[String: Any]])
         var models = try #require(days[0]["modelBreakdowns"] as? [[String: Any]])

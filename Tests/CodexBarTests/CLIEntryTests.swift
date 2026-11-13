@@ -20,7 +20,7 @@ final class CLIEntryTests: XCTestCase {
     func test_dashboardCommandIsRegisteredAndParsesOptions() throws {
         let program = Program(descriptors: CodexBarCLI.commandDescriptors())
         let invocation = try program.resolve(
-            argv: ["dashboard", "--pretty", "--timeout", "45", "--output", "/tmp/snapshot.json"])
+            arguments: ["dashboard", "--pretty", "--timeout", "45", "--output", "/tmp/snapshot.json"])
 
         XCTAssertEqual(invocation.path, ["dashboard"])
         XCTAssertTrue(invocation.parsedValues.flags.contains("pretty"))
@@ -53,6 +53,19 @@ final class CLIEntryTests: XCTestCase {
         XCTAssertNotEqual(result.status, 0)
         XCTAssertTrue(result.stdout.isEmpty)
         XCTAssertFalse(result.stderr.isEmpty)
+    }
+
+    func test_costRejectsMalformedDaysInsteadOfUsingSavedPeriod() throws {
+        for days in ["banana", "1.5", "99999999999999999999999999999"] {
+            let result = try Self.runCLI(
+                arguments: ["cost", "--provider", "codex", "--provider-native-only", "--days", days, "--json"],
+                environment: ["CODEXBAR_DISABLE_KEYCHAIN_ACCESS": "1"])
+            XCTAssertEqual(result.status, 1, days)
+            let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: result.stdout) as? [[String: Any]])
+            let error = try XCTUnwrap(rows.first?["error"] as? [String: Any])
+            XCTAssertEqual(error["kind"] as? String, "args", days)
+            XCTAssertEqual(error["message"] as? String, "Error: --days must be an integer.", days)
+        }
     }
 
     /// `Program.resolve` throws before `ParsedValues` (and `resolveUsageOutputPreferences`) exist, so
@@ -224,8 +237,8 @@ final class CLIEntryTests: XCTestCase {
         XCTAssertEqual(CodexBarCLI._decodeFormatForTesting(from: textDefault), .text)
     }
 
-    func test_providerSelectionPrefersOverride() {
-        let selection = CodexBarCLI.providerSelection(rawOverride: "codex", enabled: [.claude, .gemini])
+    func test_providerSelectionPrefersOverride() throws {
+        let selection = try CodexBarCLI.providerSelection(rawOverride: "codex", enabled: [.claude, .gemini])
         XCTAssertEqual(selection.asList, [.codex])
     }
 
@@ -513,8 +526,8 @@ final class CLIEntryTests: XCTestCase {
         XCTAssertFalse(payload.message.contains("Codex not running"))
     }
 
-    func test_providerSelectionFallsBackToBothForPrimaryPair() {
-        let selection = CodexBarCLI.providerSelection(rawOverride: nil, enabled: [.codex, .claude])
+    func test_providerSelectionFallsBackToBothForPrimaryPair() throws {
+        let selection = try CodexBarCLI.providerSelection(rawOverride: nil, enabled: [.codex, .claude])
         switch selection {
         case .both:
             break
@@ -523,8 +536,8 @@ final class CLIEntryTests: XCTestCase {
         }
     }
 
-    func test_providerSelectionFallsBackToCustomWhenNonPrimary() {
-        let selection = CodexBarCLI.providerSelection(rawOverride: nil, enabled: [.codex, .gemini])
+    func test_providerSelectionFallsBackToCustomWhenNonPrimary() throws {
+        let selection = try CodexBarCLI.providerSelection(rawOverride: nil, enabled: [.codex, .gemini])
         switch selection {
         case let .custom(providers):
             XCTAssertEqual(providers, [.codex, .gemini])
@@ -533,8 +546,8 @@ final class CLIEntryTests: XCTestCase {
         }
     }
 
-    func test_providerSelectionHonorsEmptyEnabledSet() {
-        let selection = CodexBarCLI.providerSelection(rawOverride: nil, enabled: [])
+    func test_providerSelectionHonorsEmptyEnabledSet() throws {
+        let selection = try CodexBarCLI.providerSelection(rawOverride: nil, enabled: [])
         switch selection {
         case let .custom(providers):
             XCTAssertEqual(providers, [])
@@ -626,7 +639,16 @@ final class CLIEntryTests: XCTestCase {
             attempts: attempts))
     }
 
-    func test_sourceModeRequiresWebSupportIsProviderAware() throws {
+    private func expectWebSupport(
+        _ condition: @autoclosure () async -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line) async
+    {
+        let result = await condition()
+        XCTAssertTrue(result, file: file, line: line)
+    }
+
+    func test_sourceModeRequiresWebSupportIsProviderAware() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("mimo-cli-source-mode-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -644,19 +666,19 @@ final class CLIEntryTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: payload).write(to: validMiMoCache)
         try Data("{}".utf8).write(to: invalidMiMoCache)
 
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .kilo))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .codex))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .claude))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .claude))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .kilo))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .grok))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .grok))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .venice))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.api, provider: .venice))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .venice))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .amp))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(.api, provider: .kilo))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .kilo))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .codex))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .claude))
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .claude))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .kilo))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .grok))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .grok))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .venice))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.api, provider: .venice))
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(.web, provider: .venice))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.auto, provider: .amp))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(.api, provider: .kilo))
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .opencodego,
             settings: ProviderSettingsSnapshot.make(
@@ -664,7 +686,7 @@ final class CLIEntryTests: XCTestCase {
                     cookieSource: .manual,
                     manualCookieHeader: "auth=manual",
                     workspaceID: nil))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .opencodego,
             settings: ProviderSettingsSnapshot.make(
@@ -672,7 +694,7 @@ final class CLIEntryTests: XCTestCase {
                     cookieSource: .manual,
                     manualCookieHeader: "auth=manual",
                     workspaceID: nil))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .opencodego,
             settings: ProviderSettingsSnapshot.make(
@@ -680,7 +702,7 @@ final class CLIEntryTests: XCTestCase {
                     cookieSource: .auto,
                     manualCookieHeader: nil,
                     workspaceID: nil))))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .opencodego,
             settings: ProviderSettingsSnapshot.make(
@@ -688,54 +710,54 @@ final class CLIEntryTests: XCTestCase {
                     cookieSource: .auto,
                     manualCookieHeader: nil,
                     workspaceID: nil))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .commandcode,
             settings: ProviderSettingsSnapshot.make(
                 commandcode: .init(
                     cookieSource: .manual,
                     manualCookieHeader: "session=manual"))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .commandcode,
             settings: ProviderSettingsSnapshot.make(
                 commandcode: .init(
                     cookieSource: .manual,
                     manualCookieHeader: "session=manual"))))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .commandcode,
             settings: ProviderSettingsSnapshot.make(
                 commandcode: .init(
                     cookieSource: .auto,
                     manualCookieHeader: nil))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .sakana,
             environment: ["SAKANA_COOKIE": "session=manual"]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .sakana,
             environment: ["SAKANA_COOKIE": "session=manual"]))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .sakana,
             environment: [:]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .qoder,
             settings: ProviderSettingsSnapshot.make(
                 qoder: .init(
                     cookieSource: .manual,
                     manualCookieHeader: "sid=manual"))))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .qoder,
             settings: ProviderSettingsSnapshot.make(
                 qoder: .init(
                     cookieSource: .auto,
                     manualCookieHeader: nil))))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .opencode,
             settings: ProviderSettingsSnapshot.make(
@@ -743,77 +765,77 @@ final class CLIEntryTests: XCTestCase {
                     cookieSource: .manual,
                     manualCookieHeader: "auth=manual",
                     workspaceID: nil))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .ollama,
             environment: ["OLLAMA_API_KEY": "ollama-test"]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .codex,
             environment: ["OLLAMA_API_KEY": "ollama-test"]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .ollama,
             settings: ProviderSettingsSnapshot.make(
                 ollama: .init(cookieSource: .off, manualCookieHeader: nil))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .kimi,
             environment: ["KIMI_CODE_API_KEY": "kimi-test"]))
-        try self.assertKimiCodeCredentialSourceMode(in: directory)
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        try await self.assertKimiCodeCredentialSourceMode(in: directory)
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .mimo,
             environment: ["MIMO_LOCAL_USAGE_PATH": validMiMoCache.path]))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .mimo,
             environment: ["MIMO_LOCAL_USAGE_PATH": validMiMoCache.path]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .mimo,
             environment: ["MIMO_LOCAL_USAGE_PATH": invalidMiMoCache.path]))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .mimo,
             environment: ["MIMO_LOCAL_USAGE_PATH": directory.appendingPathComponent("missing.json").path]))
     }
 
-    func test_sourceModeRequiresWebSupportAllowsOllamaManualCookieOnLinuxGate() {
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+    func test_sourceModeRequiresWebSupportAllowsOllamaManualCookieOnLinuxGate() async {
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .ollama,
             settings: ProviderSettingsSnapshot.make(
                 ollama: .init(cookieSource: .manual, manualCookieHeader: "__Secure-session=manual"))))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .ollama,
             settings: ProviderSettingsSnapshot.make(
                 ollama: .init(cookieSource: .manual, manualCookieHeader: "__Secure-session=manual"))))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .ollama,
             settings: ProviderSettingsSnapshot.make(
                 ollama: .init(cookieSource: .manual, manualCookieHeader: "   "))))
     }
 
-    func test_sourceModeRequiresWebSupportAllowsQwenCookiesOnLinuxGate() {
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+    func test_sourceModeRequiresWebSupportAllowsQwenCookiesOnLinuxGate() async {
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .qwencloud,
             environment: ["QWEN_CLOUD_COOKIE": "login_qwencloud_ticket=test"]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .qwencloud,
             settings: ProviderSettingsSnapshot.make(
                 qwenCloud: .init(
                     cookieSource: .manual,
                     manualCookieHeader: "login_qwencloud_ticket=test"))))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .qwencloud,
             environment: [:]))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .qwencloud,
             environment: ["QWEN_CLOUD_COOKIE": "login_qwencloud_ticket=test"],
@@ -821,7 +843,7 @@ final class CLIEntryTests: XCTestCase {
                 qwenCloud: .init(cookieSource: .off, manualCookieHeader: nil))))
     }
 
-    private func assertKimiCodeCredentialSourceMode(in directory: URL) throws {
+    private func assertKimiCodeCredentialSourceMode(in directory: URL) async throws {
         let home = directory.appendingPathComponent("kimi-code", isDirectory: true)
         let credentials = home.appendingPathComponent("credentials", isDirectory: true)
         try FileManager.default.createDirectory(at: credentials, withIntermediateDirectories: true)
@@ -833,30 +855,30 @@ final class CLIEntryTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: payload)
             .write(to: credentials.appendingPathComponent("kimi-code.json"))
 
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .kimi,
             environment: ["KIMI_CODE_HOME": home.path]))
     }
 
-    func test_sourceModeRequiresWebSupportAllowsFactoryAPIKeyOnLinuxGate() {
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+    func test_sourceModeRequiresWebSupportAllowsFactoryAPIKeyOnLinuxGate() async {
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .factory,
             environment: ["FACTORY_API_KEY": "fk-test"]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .cli,
             provider: .factory,
             environment: ["FACTORY_API_KEY": "fk-test"]))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .auto,
             provider: .factory,
             environment: [:]))
-        XCTAssertTrue(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await CodexBarCLI.sourceModeRequiresWebSupport(
             .web,
             provider: .factory,
             environment: ["FACTORY_API_KEY": "fk-test"]))
-        XCTAssertFalse(CodexBarCLI.sourceModeRequiresWebSupport(
+        await self.expectWebSupport(await !CodexBarCLI.sourceModeRequiresWebSupport(
             .api,
             provider: .factory,
             environment: [:]))
@@ -902,6 +924,41 @@ final class CLIEntryTests: XCTestCase {
 }
 
 extension CLIEntryTests {
+    func test_unknownProviderArgumentsExitWithStructuredErrors() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configURL = root.appendingPathComponent("config.json")
+        try CodexBarConfigStore(fileURL: configURL).save(CodexBarConfig(providers: [
+            ProviderConfig(id: .codex, enabled: false),
+            ProviderConfig(id: .claude, enabled: false),
+        ]))
+        let environment = ["CODEXBAR_CONFIG": configURL.path, "CODEXBAR_DISABLE_KEYCHAIN_ACCESS": "1"]
+        for command in ["usage", "cost", "diagnose"] {
+            let result = try Self.runCLI(
+                arguments: [command, "--provider", "not-a-real-provider", "--format", "json"],
+                environment: environment)
+            XCTAssertEqual(result.status, 1, command)
+            let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: result.stdout) as? [[String: Any]])
+            let error = try XCTUnwrap(rows.first?["error"] as? [String: Any])
+            XCTAssertEqual(error["kind"] as? String, "args", command)
+            XCTAssertEqual(error["code"] as? Int, 1, command)
+            XCTAssertEqual(error["message"] as? String, "Error: unknown provider 'not-a-real-provider'", command)
+        }
+        let omitted = try Self.runCLI(arguments: ["usage", "--json"], environment: environment)
+        XCTAssertEqual(omitted.status, 0)
+        XCTAssertEqual(try XCTUnwrap(String(data: omitted.stdout, encoding: .utf8)).trimmingCharacters(
+            in: .whitespacesAndNewlines), "[]")
+        for command in ["usage", "cards"] {
+            let text = try Self.runCLI(
+                arguments: [command, "--provider", "not-a-real-provider"], environment: environment)
+            XCTAssertEqual(text.status, 1, command)
+            XCTAssertTrue(text.stdout.isEmpty, command)
+            XCTAssertEqual(
+                String(data: text.stderr, encoding: .utf8),
+                "Error: unknown provider 'not-a-real-provider'\n")
+        }
+    }
+
     fileprivate static func runCLI(
         arguments: [String],
         environment: [String: String] = [:]) throws -> (status: Int32, stdout: Data, stderr: Data)
@@ -931,5 +988,47 @@ extension CLIEntryTests {
             process.terminationStatus,
             stdout.fileHandleForReading.readDataToEndOfFile(),
             stderr.fileHandleForReading.readDataToEndOfFile())
+    }
+}
+
+extension CodexBarCLI {
+    static func sourceModeRequiresWebSupport(
+        _ sourceMode: ProviderSourceMode,
+        provider: UsageProvider,
+        environment: [String: String]? = nil,
+        settings: ProviderSettingsSnapshot? = nil) async -> Bool
+    {
+        let env = environment ?? [:]
+        let browserDetection = BrowserDetection(cacheTTL: 0)
+        let context = ProviderFetchContext(
+            runtime: .cli,
+            sourceMode: sourceMode,
+            includeCredits: false,
+            webTimeout: 1,
+            webDebugDumpHTML: false,
+            verbose: false,
+            env: env,
+            settings: settings,
+            fetcher: UsageFetcher(environment: env),
+            claudeFetcher: ClaudeUsageFetcher(browserDetection: browserDetection),
+            browserDetection: browserDetection)
+        return await self.sourceModeRequiresWebSupport(provider: provider, context: context)
+    }
+}
+
+extension CLIEntryTests {
+    func test_missingOptionValuesPreserveArgumentExitCodes() throws {
+        let cases: [(arguments: [String], expectedStatus: Int32)] = [
+            (["usage", "--provider"], 1),
+            (["guard", "--provider"], 64),
+            (["dashboard", "--output"], 1),
+        ]
+        for testCase in cases {
+            let result = try Self.runCLI(arguments: testCase.arguments)
+            XCTAssertEqual(result.status, testCase.expectedStatus)
+            XCTAssertTrue(result.stdout.isEmpty)
+            let stderr = try XCTUnwrap(String(bytes: result.stderr, encoding: .utf8))
+            XCTAssertTrue(stderr.contains("Missing value for option"))
+        }
     }
 }

@@ -2,7 +2,7 @@ import CodexBarCore
 import Foundation
 
 /// How much account identity a dashboard snapshot exposes. Dashboard commands
-/// default to `.full`; `.redacted` remains available as an explicit privacy mode.
+/// retain ordinary snapshot defaults; live account expansion defaults to `.none`.
 enum DashboardIdentityMode: String, Equatable, Sendable {
     case none
     case redacted
@@ -54,11 +54,13 @@ struct DashboardProviderPayload: Encodable {
     let display: DashboardDisplayPayload
     let error: ProviderErrorPayload?
     let updatedAt: Date?
-    /// Per-account entries from a local multi-account source (today: claude-swap).
+    /// Saved managed Codex and Claude-swap entries; additional live accounts are opt-in.
     /// Additive schema-v1 data; absent for providers without such a source.
     let accounts: [DashboardAccountPayload]?
     /// Row-local failure of the multi-account source; the ambient provider row stays intact.
     let accountsError: String?
+    /// Additive schema-v1 data; absent unless the provider reported a partial-data condition.
+    let warnings: [DashboardWarningCode]?
     private let detail: DashboardSnapshotDetail
 
     init(
@@ -76,6 +78,7 @@ struct DashboardProviderPayload: Encodable {
         updatedAt: Date?,
         accounts: [DashboardAccountPayload]?,
         accountsError: String?,
+        warnings: [DashboardWarningCode]? = nil,
         detail: DashboardSnapshotDetail = .full)
     {
         self.id = id
@@ -92,6 +95,7 @@ struct DashboardProviderPayload: Encodable {
         self.updatedAt = updatedAt
         self.accounts = accounts
         self.accountsError = accountsError
+        self.warnings = warnings?.isEmpty == false ? warnings : nil
         self.detail = detail
     }
 
@@ -110,6 +114,7 @@ struct DashboardProviderPayload: Encodable {
         case updatedAt
         case accounts
         case accountsError
+        case warnings
     }
 
     func encode(to encoder: Encoder) throws {
@@ -129,7 +134,13 @@ struct DashboardProviderPayload: Encodable {
         try container.encode(self.updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(self.accounts, forKey: .accounts)
         try container.encodeIfPresent(self.accountsError, forKey: .accountsError)
+        try container.encodeIfPresent(self.warnings, forKey: .warnings)
     }
+}
+
+/// Fixed partial-data codes; provider notice text never crosses the dashboard identity boundary.
+enum DashboardWarningCode: String, Encodable, Equatable {
+    case modelBreakdownUnavailable = "model-breakdown-unavailable"
 }
 
 struct DashboardAccountPayload: Encodable {

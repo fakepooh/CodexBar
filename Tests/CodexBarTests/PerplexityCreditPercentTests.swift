@@ -68,7 +68,7 @@ struct PerplexityCreditPercentTests {
         for (preference, expected): (MenuBarPercentWindowPreference, String) in [
             (.session, showUsed ? "C 100%" : "C 0%"),
             (.weekly, showUsed ? "B 25%" : "B 75%"),
-            (.automatic, showUsed ? "25%" : "75%"),
+            (.automatic, showUsed ? "B 25%" : "B 75%"),
         ] {
             let layout = preference.applied(to: MenuBarLayout(lines: [[.percent(window: .automatic)]]))
             let output = MenuBarLayoutRenderer().render(
@@ -93,10 +93,10 @@ struct PerplexityCreditPercentTests {
                 #expect(output.accessibilityLabel == (showUsed ? "Credits 100%" : "Credits 0%"))
             }
         }
-        for token: MenuBarLayoutToken in [
-            .resetCountdown, .resetAbsolute,
-            .windowResetCountdown(window: .automatic), .windowResetAbsolute(window: .automatic),
-            .windowResetCountdown(window: .weekly), .windowResetAbsolute(window: .weekly),
+        for (token, expected): (MenuBarLayoutToken, String) in [
+            (.resetCountdown, "B –"), (.resetAbsolute, "B –"),
+            (.windowResetCountdown(window: .automatic), "B –"), (.windowResetAbsolute(window: .automatic), "B –"),
+            (.windowResetCountdown(window: .weekly), "–"), (.windowResetAbsolute(window: .weekly), "–"),
         ] {
             let output = MenuBarLayoutRenderer().render(
                 layout: MenuBarLayout(lines: [[token]]),
@@ -110,8 +110,99 @@ struct PerplexityCreditPercentTests {
                     appearanceName: NSAppearance.Name.aqua.rawValue,
                     isDebugApp: false,
                     now: self.now))
-            #expect(output.attributedTitle.string == "–")
+            #expect(output.attributedTitle.string == expected)
             #expect(!output.accessibilityLabel.contains("1000/4000"))
+        }
+    }
+
+    @Test
+    func `org credits render as detail in the menu card and CLI`() async throws {
+        let now = Date(timeIntervalSince1970: 1_792_000_000)
+        let json = """
+        {
+          "balance_cents": 3342.28,
+          "renewal_date_ts": 1794405600,
+          "current_period_purchased_cents": 0,
+          "org_pool_draws_cents": 24371,
+          "org_user_cap_cents": 300000,
+          "is_org_pool_depleted": false,
+          "credit_grants": [
+            { "type": "recurring", "amount_cents": 500, "remaining_cents": 0,
+              "expires_at_ts": 1794405600, "effective_at_ts": 1791727200 }
+          ],
+          "total_usage_cents": 24870.74
+        }
+        """
+        let snapshot = try await CookiePluginFixtures.perplexity(Data(json.utf8), now: now)
+            .toUsageSnapshot()
+        let detail = "24371/27713 credits"
+        #expect(snapshot.extraRateWindows?.first?.window.resetDescription == detail)
+
+        let model = try UsageMenuCardView.Model.make(.init(
+            provider: .perplexity,
+            metadata: #require(ProviderDefaults.metadata[.perplexity]),
+            snapshot: snapshot,
+            credits: nil,
+            creditsError: nil,
+            dashboardError: nil,
+            tokenSnapshot: nil,
+            tokenError: nil,
+            account: AccountInfo(email: nil, plan: nil),
+            isRefreshing: false,
+            lastError: nil,
+            usageBarsShowUsed: false,
+            resetTimeDisplayStyle: .countdown,
+            tokenCostUsageEnabled: false,
+            costSummaryInlineEnabled: true,
+            showOptionalCreditsAndExtraUsage: true,
+            hidePersonalInfo: false,
+            now: now))
+        let org = try #require(model.metrics.first { $0.id == "org-credits" })
+        #expect(org.title == "Organization")
+        #expect(org.resetText == nil)
+        #expect(org.detailText == detail)
+
+        let text = CLIRenderer.renderText(
+            provider: .perplexity,
+            snapshot: snapshot,
+            credits: nil,
+            context: RenderContext(header: "Perplexity", status: nil, useColor: false, resetStyle: .countdown),
+            now: now)
+        #expect(text.contains("Organization: "))
+        #expect(text.contains(detail))
+        #expect(!text.contains("Resets \(detail)"))
+
+        let card = CLICardsRenderer.makeCard(CLICardBuildInput(
+            provider: .perplexity,
+            snapshot: snapshot,
+            credits: nil,
+            source: "synthetic",
+            status: nil,
+            notes: [],
+            useColor: false,
+            resetStyle: .countdown,
+            weeklyWorkDays: nil,
+            now: now))
+        let cardOrg = try #require(card.metrics.first { $0.label == "Organization" })
+        #expect(cardOrg.detailText == detail)
+        #expect(cardOrg.resetText == nil)
+
+        let data = self.renderData(provider: .perplexity, snapshot: snapshot)
+        let automatic = MenuBarLayoutRenderer().render(
+            layout: MenuBarLayout(lines: [[.percent(window: .automatic)]]),
+            data: data,
+            icon: nil,
+            options: MenuBarLayoutRenderOptions(
+                size: .regular,
+                highContrast: false,
+                showUsed: false,
+                conditionals: [],
+                appearanceName: NSAppearance.Name.aqua.rawValue,
+                isDebugApp: false,
+                now: now))
+        #expect(automatic.attributedTitle.string == "Organization 12%")
+        CodexBarLocalizationOverride.$appLanguage.withValue("it") {
+            #expect(data.extraTitle("org-credits") == "Organizzazione")
         }
     }
 
@@ -120,7 +211,7 @@ struct PerplexityCreditPercentTests {
         let automatic = MenuBarMetricWindowResolver.rateWindow(
             preference: .automatic, provider: provider, snapshot: snapshot, supportsAverage: false)
         return MenuBarLayoutRenderData(
-            provider: provider,
+            provider: provider.instanceID,
             iconKey: provider.rawValue,
             providerName: ProviderDefaults.metadata[provider]?.displayName,
             accountLabel: nil,
@@ -128,6 +219,8 @@ struct PerplexityCreditPercentTests {
             primary: MenuBarLayoutRenderWindow(snapshot.primary),
             secondary: MenuBarLayoutRenderWindow(snapshot.secondary),
             tertiary: MenuBarLayoutRenderWindow(snapshot.tertiary),
+            extraRateWindows: MenuBarLayoutNamedExtra.windows(provider: provider, snapshot: snapshot)
+                .map(MenuBarLayoutRenderExtra.init),
             session: MenuBarLayoutRenderWindow(semantic.session),
             weekly: MenuBarLayoutRenderWindow(semantic.weekly),
             scopedWeekly: nil,
@@ -181,11 +274,20 @@ struct PerplexityCreditPercentTests {
                     windowMinutes: nil,
                     resetsAt: hasDate ? date : nil,
                     resetDescription: description))
-                let text = MenuBarLayoutResetText(window: window, provider: provider, now: self.now)
+                let countdown = MenuBarLayoutResetText(
+                    window: window,
+                    provider: provider.instanceID,
+                    now: self.now,
+                    absolute: false)
+                let absolute = MenuBarLayoutResetText(
+                    window: window,
+                    provider: provider.instanceID,
+                    now: self.now,
+                    absolute: true)
                 let fallback: String? = [.codex, .deepseek].contains(provider) ? description : nil
-                #expect(text.countdown == (hasDate ? "in 2h" : fallback))
-                #expect(text
-                    .absolute == (hasDate ? UsageFormatter.resetDescription(from: date, now: self.now) : fallback))
+                #expect(countdown.value == (hasDate ? "in 2h" : fallback))
+                #expect(absolute
+                    .value == (hasDate ? UsageFormatter.resetDescription(from: date, now: self.now) : fallback))
             }
         }
     }

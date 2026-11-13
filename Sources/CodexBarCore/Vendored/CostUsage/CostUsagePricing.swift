@@ -249,6 +249,28 @@ enum CostUsagePricing {
             outputCostPerTokenAboveThreshold: nil,
             cacheCreationInputCostPerTokenAboveThreshold: nil,
             cacheReadInputCostPerTokenAboveThreshold: nil),
+        // Mythos is served to verified organizations only and is absent from the models.dev
+        // anthropic catalog. Rates: https://platform.claude.com/docs/en/about-claude/pricing
+        "claude-mythos-5": ClaudePricing(
+            inputCostPerToken: 1e-5,
+            outputCostPerToken: 5e-5,
+            cacheCreationInputCostPerToken: 1.25e-5,
+            cacheReadInputCostPerToken: 1e-6,
+            thresholdTokens: nil,
+            inputCostPerTokenAboveThreshold: nil,
+            outputCostPerTokenAboveThreshold: nil,
+            cacheCreationInputCostPerTokenAboveThreshold: nil,
+            cacheReadInputCostPerTokenAboveThreshold: nil),
+        "claude-mythos-5-1": ClaudePricing(
+            inputCostPerToken: 1e-5,
+            outputCostPerToken: 5e-5,
+            cacheCreationInputCostPerToken: 1.25e-5,
+            cacheReadInputCostPerToken: 2.5e-7,
+            thresholdTokens: nil,
+            inputCostPerTokenAboveThreshold: nil,
+            outputCostPerTokenAboveThreshold: nil,
+            cacheCreationInputCostPerTokenAboveThreshold: nil,
+            cacheReadInputCostPerTokenAboveThreshold: nil),
         "claude-opus-4-5-20251101": ClaudePricing(
             inputCostPerToken: 5e-6,
             outputCostPerToken: 2.5e-5,
@@ -635,7 +657,7 @@ enum CostUsagePricing {
         pricingResolver: CodexResolver? = nil) -> Double?
     {
         guard let multiplier = self.codexAPIFastMultiplier(model: model) else { return nil }
-        // Keep older models' established cutoff; Astra explicitly publishes long-context Fast rates.
+        // Keep older models' established cutoff; Astra and GPT-6.1 Sol publish long-context Fast rates.
         if max(0, inputTokens) > self.codexPriorityInputTokenLimit,
            !self.codexAPIFastAllowsLongContext(model: model)
         {
@@ -660,14 +682,17 @@ enum CostUsagePricing {
     /// distinct from ChatGPT/Codex Fast credit multipliers, which do not represent a USD charge.
     static func codexAPIFastMultiplier(model: String) -> Double? {
         switch self.normalizeCodexModel(model) {
-        case "gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra": 2
+        case "gpt-5.4", "gpt-5.4-mini", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6.1-sol": 2
         case "gpt-5.5": 2.5
         default: nil
         }
     }
 
     private static func codexAPIFastAllowsLongContext(model: String) -> Bool {
-        self.normalizeCodexModel(model) == "gpt-6-astra"
+        switch self.normalizeCodexModel(model) {
+        case "gpt-6-astra", "gpt-6.1-sol": true
+        default: false
+        }
     }
 
     static func codexCostUSD(

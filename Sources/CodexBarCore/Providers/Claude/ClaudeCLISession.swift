@@ -73,6 +73,8 @@ actor ClaudeCLISession {
     private var primaryHandle: FileHandle?
     private var secondaryHandle: FileHandle?
     private var processGroup: pid_t?
+    private var rootProcessIdentity: TTYProcessTreeTerminator.ProcessIdentity?
+    private var ownershipReaper: ProcessOwnershipReaper?
     private var sessionIdentity: SessionIdentity?
     private var startedAt: Date?
     private var launchedInProbeDirectory = false
@@ -141,6 +143,7 @@ actor ClaudeCLISession {
     }
 
     private func captureExclusive(request: CaptureRequest) async throws -> String {
+        defer { self.releaseSleepInhibitors() }
         if try self.ensureStarted(request: request) {
             // Dismiss /usage or /status before typing; keep Escape separate from the next command's input.
             try self.send("\u{1b}")
@@ -166,6 +169,7 @@ actor ClaudeCLISession {
         var lastOutputAt = Date()
         var lastEnterAt = Date()
         var uncheckedFrame = false
+        var usagePanelOpen = false
         var trustPending = false
         var trustKeysLeft = 4
         var stoppedEarly = false
@@ -187,6 +191,9 @@ actor ClaudeCLISession {
                 uncheckedFrame = false
                 let screen = ClaudeCLIScreen.render(text)
                 let normalized = Self.normalizedNeedle(screen)
+                if commandSent, trimmed == "/usage" {
+                    usagePanelOpen = usagePanelOpen || ClaudeStatusProbe.usageCaptureHasSessionValue(normalized)
+                }
                 let trustKeys = Self.workspaceTrustKeys(onScreen: screen, acceptsTrust: self.launchedInProbeDirectory)
                 trustPending = trustKeys != nil || normalized.contains("quicksafetycheck:") ||
                     normalized.contains("doyoutrustthefilesinthisfolder?") ||
@@ -204,7 +211,7 @@ actor ClaudeCLISession {
                         stoppedEarly = true
                         break
                     }
-                    for needle in sendNeedles where !triggeredSends.contains(needle) {
+                    for needle in sendNeedles where !usagePanelOpen && !triggeredSends.contains(needle) {
                         if self.process?.isRunning == true, normalized.contains(needle) {
                             try? self.send("\r")
                             triggeredSends.insert(needle)
@@ -227,7 +234,9 @@ actor ClaudeCLISession {
                     stoppedEarly = true
                     break
                 }
-                self.sendPeriodicEnterIfNeeded(every: request.sendEnterEvery, lastEnterAt: &lastEnterAt)
+                self.sendPeriodicEnterIfNeeded(
+                    every: usagePanelOpen ? nil : request.sendEnterEvery,
+                    lastEnterAt: &lastEnterAt)
             }
             if let proc = self.process, !proc.isRunning {
                 Self.log.warning(
@@ -327,7 +336,9 @@ actor ClaudeCLISession {
         let disableWatchdog = sessionIdentity.environment["CODEXBAR_DISABLE_CLAUDE_WATCHDOG"] == "1"
         if !disableWatchdog,
            resolvedURL.lastPathComponent == "claude",
-           let watchdog = TTYCommandRunner.locateBundledHelper("CodexBarClaudeWatchdog")
+           let watchdog = TTYCommandRunner.locateBundledHelper(
+               "CodexBarClaudeWatchdog",
+               environment: sessionIdentity.environment)
         {
             proc.executableURL = URL(fileURLWithPath: watchdog)
             proc.arguments = ["--", request.binary] + claudeArguments
@@ -340,8 +351,10 @@ actor ClaudeCLISession {
         proc.standardError = secondaryHandle
 
         proc.currentDirectoryURL = workingDirectory
+        let ownershipReaper = ProcessOwnershipReaper()
         var env = sessionIdentity.environment
         env["PWD"] = workingDirectory.path
+        env[ProcessOwnershipReaper.environmentKey] = ownershipReaper.marker
         proc.environment = env
 
         guard TTYCommandRunner.beginActiveProcessLaunchForAppShutdown() else {
@@ -376,7 +389,7 @@ actor ClaudeCLISession {
         }
 
         var processGroup: pid_t?
-        if setpgid(pid, pid) == 0 {
+        if setpgid(pid, pid) == 0 || getpgid(pid) == pid {
             processGroup = pid
             TTYCommandRunner.updateActiveProcessGroupForAppShutdown(pid: pid, processGroup: processGroup)
         }
@@ -386,6 +399,8 @@ actor ClaudeCLISession {
         self.primaryHandle = primaryHandle
         self.secondaryHandle = secondaryHandle
         self.processGroup = processGroup
+        self.rootProcessIdentity = TTYProcessTreeTerminator.processIdentity(for: pid)
+        self.ownershipReaper = ownershipReaper
         self.sessionIdentity = sessionIdentity
         self.startedAt = Date()
         // Only the dedicated probe directory may be trusted, never `probeWorkingDirectoryURL()`'s temporary fallback.
@@ -452,14 +467,7 @@ actor ClaudeCLISession {
     }
 
     static func launchEnvironment(baseEnv: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-        var env = self.scrubbedClaudeEnvironment(from: TTYCommandRunner.enrichedEnvironment(baseEnv: baseEnv))
-        // Passive status and auth probes must not mutate or update the user's Claude CLI installation.
-        env["DISABLE_AUTOUPDATER"] = "1"
-        return env
-    }
-
-    private static func scrubbedClaudeEnvironment(from base: [String: String]) -> [String: String] {
-        var env = base
+        var env = TTYCommandRunner.enrichedEnvironment(baseEnv: baseEnv)
         let explicitKeys: [String] = [
             ClaudeOAuthCredentialsStore.environmentTokenKey,
             ClaudeOAuthCredentialsStore.environmentScopesKey,
@@ -470,10 +478,87 @@ actor ClaudeCLISession {
         for key in env.keys where key.hasPrefix("ANTHROPIC_") {
             env.removeValue(forKey: key)
         }
+        // Passive status and auth probes must not mutate or update the user's Claude CLI installation.
+        env["DISABLE_AUTOUPDATER"] = "1"
         return env
     }
 
+    #if canImport(Darwin)
+    private func currentLiveTreeIdentities() -> Set<TTYProcessTreeTerminator.ProcessIdentity> {
+        guard let proc = self.process, proc.isRunning,
+              let rootIdentity = self.rootProcessIdentity
+              ?? TTYProcessTreeTerminator.processIdentity(for: proc.processIdentifier),
+              TTYProcessTreeTerminator.isCurrent(rootIdentity)
+        else { return [] }
+        let rootPID = rootIdentity.pid
+        let treePIDs = Set([rootPID] + TTYProcessTreeTerminator.descendantPIDs(of: rootPID))
+        let uid = getuid()
+        var identities: Set<TTYProcessTreeTerminator.ProcessIdentity> = []
+        for pid in treePIDs {
+            guard let info = DarwinProcessEnumerator.processInfo(pid: pid),
+                  info.pbi_uid == uid,
+                  pid == rootPID || treePIDs.contains(pid_t(info.pbi_ppid)),
+                  let identity = TTYProcessTreeTerminator.processIdentity(for: pid),
+                  TTYProcessTreeTerminator.isCurrent(identity)
+            else { continue }
+            identities.insert(identity)
+        }
+        return identities
+    }
+
+    private func ownsProcess(
+        _ identity: TTYProcessTreeTerminator.ProcessIdentity,
+        marker: String?,
+        liveTreeIdentities: Set<TTYProcessTreeTerminator.ProcessIdentity>) -> Bool
+    {
+        let pid = identity.pid
+        guard pid > 1, pid != getpid(),
+              let info = DarwinProcessEnumerator.processInfo(pid: pid),
+              info.pbi_uid == getuid(),
+              TTYProcessTreeTerminator.isCurrent(identity)
+        else { return false }
+        if liveTreeIdentities.contains(identity) {
+            return true
+        }
+        let group = getpgid(pid)
+        if group > 1, group != getpgrp(),
+           liveTreeIdentities.contains(where: { leader in
+               leader.pid == group
+                   && identity.startToken >= leader.startToken
+                   && TTYProcessTreeTerminator.isCurrent(leader)
+                   && getpgid(leader.pid) == group
+           })
+        {
+            return TTYProcessTreeTerminator.isCurrent(identity) && getpgid(pid) == group
+        }
+        guard let marker else { return false }
+        let environment = DarwinProcessEnumerator.environment(
+            pid: pid,
+            names: [ProcessOwnershipReaper.environmentKey])
+        return environment?[ProcessOwnershipReaper.environmentKey] == marker
+            && TTYProcessTreeTerminator.isCurrent(identity)
+    }
+    #endif
+
+    private func releaseSleepInhibitors() {
+        #if canImport(Darwin)
+        let marker = self.ownershipReaper?.marker
+        let liveTreeIdentities = self.currentLiveTreeIdentities()
+        guard marker != nil || !liveTreeIdentities.isEmpty else { return }
+        for pid in DarwinProcessEnumerator.allPIDs() {
+            guard DarwinProcessEnumerator.executablePath(pid: pid) == "/usr/bin/caffeinate",
+                  let identity = TTYProcessTreeTerminator.processIdentity(for: pid),
+                  self.ownsProcess(identity, marker: marker, liveTreeIdentities: liveTreeIdentities),
+                  TTYProcessTreeTerminator.isCurrent(identity)
+            else { continue }
+            kill(identity.pid, SIGTERM)
+        }
+        #endif
+    }
+
     private func cleanup() {
+        self.releaseSleepInhibitors()
+        let ownershipReaper = self.ownershipReaper
         if self.process != nil {
             Self.log.debug("Claude CLI session stopping")
         }
@@ -484,6 +569,7 @@ actor ClaudeCLISession {
         try? self.secondaryHandle?.close()
 
         let descendants = self.process.map { TTYProcessTreeTerminator.descendantPIDs(of: $0.processIdentifier) } ?? []
+        let descendantIdentities = descendants.compactMap { TTYProcessTreeTerminator.processIdentity(for: $0) }
         if let proc = self.process, proc.isRunning {
             proc.terminate()
         }
@@ -492,25 +578,30 @@ actor ClaudeCLISession {
                 rootPID: proc.processIdentifier,
                 processGroup: self.processGroup,
                 signal: SIGTERM,
-                knownDescendants: descendants)
+                knownDescendants: descendantIdentities.filter(TTYProcessTreeTerminator.isCurrent).map(\.pid))
         }
         let waitDeadline = Date().addingTimeInterval(1.0)
         if let proc = self.process {
             while proc.isRunning, Date() < waitDeadline {
                 usleep(100_000)
             }
+            let liveDescendants = descendantIdentities.filter(TTYProcessTreeTerminator.isCurrent).map(\.pid)
             if proc.isRunning {
                 TTYProcessTreeTerminator.terminateProcessTree(
                     rootPID: proc.processIdentifier,
                     processGroup: self.processGroup,
                     signal: SIGKILL,
-                    knownDescendants: descendants)
+                    knownDescendants: liveDescendants)
             } else {
-                for pid in descendants where pid > 0 {
+                for pid in liveDescendants where pid > 0 {
                     kill(pid, SIGKILL)
                 }
             }
+            ownershipReaper?.reap(processGroup: self.processGroup)
             TTYCommandRunner.unregisterActiveProcessForAppShutdown(pid: proc.processIdentifier)
+            ProcessExitRelease.afterExit(proc)
+        } else {
+            ownershipReaper?.reap(processGroup: self.processGroup)
         }
 
         self.process = nil
@@ -518,6 +609,8 @@ actor ClaudeCLISession {
         self.secondaryHandle = nil
         self.primaryFD = -1
         self.processGroup = nil
+        self.rootProcessIdentity = nil
+        self.ownershipReaper = nil
         self.sessionIdentity = nil
         self.startedAt = nil
         self.launchedInProbeDirectory = false

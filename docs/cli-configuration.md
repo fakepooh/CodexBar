@@ -35,6 +35,57 @@ command override and does not edit config.
 If every provider is disabled, `codexbar usage` with no `--provider` prints no text output, and
 `codexbar usage --json` prints `[]`. Passing `--provider <name>` still fetches that provider for the one command.
 
+## Copilot device login
+
+```bash
+codexbar config login --provider copilot
+codexbar config login --provider copilot --json
+```
+
+The command prints GitHub's verification URL and user code. Open the URL on any machine, enter the code,
+and authorize access. CodexBar polls until approval, denial, expiry, or cancellation (Ctrl-C); it does not
+open a browser or access Keychain. A configured Copilot `enterpriseHost` selects the matching GitHub issuer.
+
+On approval, CodexBar verifies the GitHub identity, saves it to the existing `providers[].tokenAccounts`,
+selects that account, and enables Copilot. Repeating login updates the matching account while preserving
+its label and settings. The legacy provider-level API key is cleared, just as when adding an account in
+Settings. If config changes while login is pending, the command fails without overwriting that edit;
+retry against the updated config. Success is reported only after the private, atomic config write succeeds.
+
+JSON mode emits newline-delimited objects (one object per event; `--pretty` has no effect):
+
+```json
+{"expiresIn":900,"status":"authorization_pending","userCode":"ABCD-EFGH","verificationURI":"https://github.com/login/device"}
+{"status":"authorized"}
+```
+
+Failures after argument parsing emit `{"status":"failed","error":"..."}` and exit nonzero. Neither output
+mode prints the access token or device code used for polling. This is an interactive setup command;
+`usage` and `serve` never start login automatically. `CODEXBAR_CONFIG` also applies to login.
+
+## Claude Platform session import
+
+Pipe a single-line Console Cookie request header containing `sessionKey` privately into:
+
+```bash
+codexbar config login --provider claudeplatform --stdin --json
+```
+
+The `claude-platform` alias is also supported. Obtain the header by signing in normally at
+<https://platform.claude.com>. The command validates only this candidate using the existing bundled provider;
+it never reads a browser store, falls back to another credential, or opens a login page. It uses the first API
+organization whose balance is readable, accepts zero balances, and tolerates optional spend failures.
+
+Only successful validation saves the manual cookie and enables the provider. Config is published privately with
+0600 permissions; unrelated settings and accounts are preserved. A rejected candidate, cancellation, concurrent
+config change, or storage failure retains the current config and never emits `authorized`. JSON uses the same
+`authorized`/`failed` event shape as Copilot; malformed input uses the CLI argument-error envelope. No credential
+or upstream response body is printed. Follow with `codexbar usage --provider claudeplatform --source web --json`.
+
+Repeat this command with a fresh header to reauthenticate. Console cookies have no supported refresh-token
+exchange here, so another human sign-in may be required. See [Claude Platform](claudeplatform.md) for organization
+selection, billing permissions, and recovery details. `config set-cookie` still stores input without validating it.
+
 ## API keys
 
 API keys are stored under the provider entry in config:
@@ -83,6 +134,36 @@ through its own browser/CLI session and takes no API key, so enable it with
 LLM Proxy also needs a base URL. Use `LLM_PROXY_BASE_URL` for CLI runs, or add `"enterpriseHost"` to the provider entry
 in the CodexBar config file.
 
+## Manual cookies
+
+Store a provider's `Cookie:` request header the same way Settings does when you paste a manual cookie:
+
+```bash
+pbpaste | codexbar config set-cookie --provider claude --stdin
+```
+
+`set-cookie` writes `cookieHeader` and sets `cookieSource` to `manual`, so browser import is skipped for that provider.
+Like `set-api-key`, it trims the value, enables the provider unless you pass `--no-enable`, and accepts `--cookie <header>`
+for one-off scripts. The header must be a single line; see [Manual cookies](configuration.md#manual-cookies) for how to
+copy it. Only providers whose fetchers read a manual config cookie accept this command; output never includes the cookie.
+
+## Clearing credentials
+
+Remove a stored API key and manual cookie, like emptying those fields in Settings:
+
+```bash
+codexbar config clear-credential --provider claude
+codexbar config clear-credential --provider claude --cookie
+codexbar config clear-credential --provider openrouter --api-key
+```
+
+Without flags both `apiKey` and `cookieHeader` are removed; `--api-key` or `--cookie` limits it to one. Provider
+enablement, `source`, `cookieSource`, token accounts, and other fields are unchanged. Manual cookie mode stays
+selected after its header is cleared. To request browser discovery, choose Automatic explicitly in Settings.
+Saved accounts and environment credentials are not removed.
+JSON output lists the removed fields in `cleared` (`apiKey`, `cookieHeader`); when nothing was stored, `cleared`
+is empty and the config file is not written.
+
 ## Isolated config files
 
 For tests, demos, and CI, point CodexBar at a temporary config file:
@@ -118,5 +199,5 @@ codexbar config dump --pretty
 `dump` prints normalized config, including providers omitted from a hand-written file.
 
 Missing, empty, or JSON-whitespace-only config files use defaults on macOS and Linux. `validate`, `dump`, and
-`usage` leave such files unchanged; the next `config enable`, `disable`, or `set-api-key` writes valid JSON.
+`usage` leave such files unchanged; the next `config enable`, `disable`, `set-api-key`, or `set-cookie` writes valid JSON.
 Malformed non-empty JSON still produces a config error and a nonzero exit without overwriting the file.

@@ -19,13 +19,13 @@ struct ProviderPluginCookieJarTests {
                 domains: ["example.test"],
                 settings: .init(cookieSource: .auto, manualCookieHeader: nil),
                 batches: { _, _ in nil },
-                jarImporter: {
-                    [.init(
+                jarImporter: { batch in
+                    batch == 0 ? [.init(
                         header: "",
                         source: ProviderInteractionContext.current == .userInitiated
                             ? "interactive" : "background",
                         origin: "",
-                        records: [])]
+                        records: [])] : nil
                 })
         }
         let runtime = try Self.runtime(engine: engine, script: """
@@ -188,13 +188,19 @@ struct ProviderPluginCookieJarTests {
         engine: ProviderPluginEngineKind, script: String,
         transport: any ProviderHTTPTransport) throws -> ProviderPluginRuntime
     {
-        try ProviderPluginRuntime(source: """
-        defineProvider({id: "longcat", name: "Fixture", settings: [], endpoints: ["https://example.test", "https://other.test", "https://example.test:444"],
-          capabilities: ["browser-cookies", "http-status"], cookieDomains: ["example.test"],
-          cookiePolicy: {selection: "request-url", cache: "nonpersistent"},
-          async fetchUsage(ctx) { \(script) }
-        });
-        """, transport: transport, engine: engine)
+        try ProviderPluginRuntime(
+            source: """
+            defineProvider({id: "longcat", name: "Fixture", settings: [], endpoints: ["https://example.test", "https://other.test", "https://example.test:444"],
+              capabilities: ["browser-cookies", "http-status"], cookieDomains: ["example.test"],
+              cookiePolicy: {selection: "request-url", cache: "nonpersistent"},
+              async fetchUsage(ctx) { \(script) }
+            });
+            """,
+            resourceBundle: CodexBarCoreResources.bundle,
+            transport: transport,
+            timeout: BundledPluginTestSupport.timeout,
+            contextOptions: BundledPluginTestSupport.contextOptions,
+            engine: engine)
     }
 
     @Test(arguments: [

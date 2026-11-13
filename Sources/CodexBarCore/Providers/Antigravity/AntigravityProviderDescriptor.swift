@@ -66,7 +66,6 @@ public enum AntigravityProviderDescriptor {
                 historyTitleStyle: .compact,
                 hintPlacement: .beforeRequestHistory,
                 chartEstimateDisclaimer: .localized(self.estimateHintKey),
-                preservesCalendarDaysInCharts: true,
                 presentation: .costAndTokens),
             pace: ProviderPaceCapability(sessionPaceWindowRule: .windowDuration(minutes: 300)),
             history: .alwaysTracked,
@@ -106,7 +105,8 @@ public enum AntigravityProviderDescriptor {
             cli: ProviderCLIConfig(
                 name: "antigravity",
                 versionDetector: nil,
-                supportsCostCommand: true))
+                supportsCostCommand: true),
+            nativeAppBundleIdentifiers: ["com.google.antigravity"])
     }
 
     static let estimateHintKey = "antigravity_cost_estimate_hint"
@@ -260,28 +260,18 @@ public enum AntigravityProviderDescriptor {
 }
 
 struct AntigravityStatusFetchStrategy: ProviderFetchStrategy {
-    enum Source {
+    enum Source: String {
         case app
         case ide
 
         var id: String {
-            switch self {
-            case .app: "antigravity.app-local"
-            case .ide: "antigravity.ide-local"
-            }
+            "antigravity.\(self.rawValue)-local"
         }
 
         var processScope: AntigravityStatusProbe.ProcessScope {
             switch self {
             case .app: .appOnly
             case .ide: .ideOnly
-            }
-        }
-
-        var sourceLabel: String {
-            switch self {
-            case .app: "app"
-            case .ide: "ide"
             }
         }
     }
@@ -313,7 +303,7 @@ struct AntigravityStatusFetchStrategy: ProviderFetchStrategy {
         try AntigravitySelectedAccountGuard.validate(usage, context: context)
         return self.makeResult(
             usage: usage,
-            sourceLabel: self.source.sourceLabel)
+            sourceLabel: self.source.rawValue)
     }
 
     func shouldFallback(on _: Error, context: ProviderFetchContext) -> Bool {
@@ -643,6 +633,18 @@ struct AntigravityCLIHTTPSFetchStrategy: ProviderFetchStrategy {
             // Earlier print implementations could turn unsupported slash commands into model prompts.
             guard let version, version >= (1, 1, 11)
             else { throw AntigravityStatusProbeError.parseFailed("CLI usage reports require agy 1.1.11 or later") }
+            // agy's OAuth launcher resolves these commands through PATH, even in print mode.
+            // Reuse the private probe directory; its owner removes the stubs after descendant cleanup.
+            var environment = environment
+            for command in ["open", "xdg-open"] {
+                guard FileManager.default.createFile(
+                    atPath: directory.appendingPathComponent(command).path,
+                    contents: Data("#!/bin/sh\nexit 1\n".utf8),
+                    attributes: [.posixPermissions: 0o700])
+                else { throw AntigravityStatusProbeError.cliReportFailed(.launchFailed) }
+            }
+            environment["PATH"] = directory.path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
+            environment["BROWSER"] = directory.appendingPathComponent("open").path
             result = try await SubprocessRunner.run(
                 binary: binary,
                 arguments: ["-p", "/usage", "--output-format", "json", "--print-timeout", "90s"],
@@ -699,7 +701,7 @@ struct AntigravityCLIHTTPSFetchStrategy: ProviderFetchStrategy {
 
         /// Sequential fallback paths replay the first probe's outcome, including a failure.
         /// Cancellation is never recorded, so a cancelled probe cannot poison a later caller.
-        func resolve(_ probe: () async throws -> (UInt, UInt, UInt)?) async throws -> (UInt, UInt, UInt)? {
+        func resolve(_ probe: @Sendable () async throws -> (UInt, UInt, UInt)?) async throws -> (UInt, UInt, UInt)? {
             try Task.checkCancellation()
             if let outcome = self.outcome { return try outcome.get() }
             do {
@@ -714,6 +716,38 @@ struct AntigravityCLIHTTPSFetchStrategy: ProviderFetchStrategy {
         }
     }
 
+    /// The executable version is account-independent; retain only the most recently used binary.
+    actor AgyVersionCache {
+        static let shared = AgyVersionCache()
+        private struct ExecutableIdentity: Equatable {
+            let path: String
+            let modified: Date
+            let size: UInt64
+            let inode: UInt64
+        }
+
+        private var cached: (identity: ExecutableIdentity, version: (UInt, UInt, UInt))?
+
+        func resolve(
+            binary: String,
+            probe: @Sendable () async throws -> (UInt, UInt, UInt)?) async throws -> (UInt, UInt, UInt)?
+        {
+            let path = URL(fileURLWithPath: binary).resolvingSymlinksInPath().path
+            guard FileManager.default.isExecutableFile(atPath: path),
+                  let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+                  let modified = attributes[.modificationDate] as? Date,
+                  let size = (attributes[.size] as? NSNumber)?.uint64Value,
+                  let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+            else { return try await probe() }
+            let identity = ExecutableIdentity(path: path, modified: modified, size: size, inode: inode)
+            if let cached, cached.identity == identity { return cached.version }
+            let version = try await probe()
+            try Task.checkCancellation()
+            if let version { self.cached = (identity, version) }
+            return version
+        }
+    }
+
     /// The legacy gate treats failures as unknown; print mode retains the classified failure.
     static func agyVersion(
         binary: String,
@@ -721,25 +755,29 @@ struct AntigravityCLIHTTPSFetchStrategy: ProviderFetchStrategy {
         directory: URL? = nil,
         timeout: TimeInterval = 3,
         maxOutputBytes: Int = 4096,
+        versionCache: AgyVersionCache = .shared,
         resolver: AgyVersionResolver = AgyVersionResolver()) async throws -> (UInt, UInt, UInt)?
     {
         try await resolver.resolve {
-            let result = try await SubprocessRunner.run(
-                binary: binary,
-                arguments: ["--version"],
-                environment: Self.childEnvironment(environment),
-                timeout: timeout,
-                maxOutputBytes: maxOutputBytes,
-                standardInput: FileHandle.nullDevice,
-                currentDirectoryURL: directory,
-                label: "antigravity-cli-version")
-            return Self.parseVersion(result.stdout)
+            try await versionCache.resolve(binary: binary) {
+                let result = try await SubprocessRunner.run(
+                    binary: binary,
+                    arguments: ["--version"],
+                    environment: Self.childEnvironment(environment),
+                    timeout: timeout,
+                    maxOutputBytes: maxOutputBytes,
+                    standardInput: FileHandle.nullDevice,
+                    currentDirectoryURL: directory,
+                    label: "antigravity-cli-version")
+                return Self.parseVersion(result.stdout)
+            }
         }
     }
 
-    private static func childEnvironment(_ environment: [String: String]) -> [String: String] {
+    static func childEnvironment(_ environment: [String: String]) -> [String: String] {
         var environment = environment
         environment.removeValue(forKey: AntigravityOAuthCredentialsStore.environmentCredentialsKey)
+        environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true" // agy ignores "1".
         environment["PATH"] = PathBuilder.effectivePATH(
             purposes: [.tty], env: environment, loginPATH: LoginShellPathCache.shared.current)
         return environment
@@ -924,13 +962,9 @@ struct AntigravityCLIHTTPSFetchStrategy: ProviderFetchStrategy {
             "Antigravity CLI started but no listening ports found")
     }
 
-    static func containsAuthenticationPrompt(_ output: Data) -> Bool {
-        AntigravityCLIAuthenticationPrompt.contains(output)
-    }
-
     private static func checkAuthenticationPrompt(_ dependencies: SnapshotWaitDependencies) async throws {
         let terminalOutput = await dependencies.drainOutput()
-        if Self.containsAuthenticationPrompt(terminalOutput) {
+        if AntigravityCLIAuthenticationPrompt.contains(terminalOutput) {
             throw AntigravityStatusProbeError.authenticationRequired
         }
     }

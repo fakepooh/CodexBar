@@ -47,13 +47,23 @@ struct CLIPluginConfigPreservationTests {
         }
     }
 
-    @Test(arguments: ["enable", "disable", "set-api-key"], ["missing", "invalid", "loaded"])
+    @Test(
+        arguments: ["enable", "disable", "set-api-key", "set-cookie", "clear-credential"],
+        ["missing", "invalid", "loaded"])
     func `config writes preserve unavailable plugins`(_ command: String, discovery: String) async throws {
         let fixture = try Fixture(discoveryFails: discovery == "invalid")
         defer { fixture.remove() }
         if discovery == "loaded" { try fixture.installPlugin() }
-        let arguments = ["config", command, "--provider", command == "set-api-key" ? "groq" : "grok", "--json"]
-            + (command == "set-api-key" ? ["--api-key", "fixture-api-key"] : [])
+        let credential: [String: [String]] = [
+            "set-api-key": ["--provider", "groq", "--api-key", "fixture-api-key"],
+            "set-cookie": ["--provider", "claude", "--cookie", "fixture-cookie=1"],
+            "clear-credential": ["--provider", "claude"],
+        ]
+        if command == "clear-credential" {
+            // Clearing only writes when something is stored.
+            _ = try await fixture.run(["config", "set-cookie"] + credential["set-cookie", default: []])
+        }
+        let arguments = ["config", command] + (credential[command] ?? ["--provider", "grok"]) + ["--json"]
         _ = try await fixture.run(arguments)
         try CodexBarConfigUnknownProviderTests.expectRetainedRecords(in: Data(contentsOf: fixture.configURL))
     }
@@ -73,6 +83,7 @@ struct CLIPluginConfigPreservationTests {
         let rows = try #require(JSONSerialization.jsonObject(with: statuses) as? [[String: Any]])
         #expect(rows.first?["provider"] as? String == "fixture-unavailable")
         #expect(rows.first?["displayName"] as? String == "Fixture Meter")
+        #expect((rows.first?["setup"] as? [String: Any])?["status"] as? String == "unknown")
         let dump = try await fixture.run(["config", "dump", "--json"])
         let root = try #require(JSONSerialization.jsonObject(with: dump) as? [String: Any])
         let providers = try #require(root["providers"] as? [[String: Any]])
@@ -88,6 +99,7 @@ struct CLIPluginConfigPreservationTests {
         let rows = try #require(JSONSerialization.jsonObject(with: statuses) as? [[String: Any]])
         #expect(rows.first?["provider"] as? String == "fixture-unavailable")
         #expect(rows.first?["displayName"] as? String == "plugin (not loaded)")
+        #expect((rows.first?["setup"] as? [String: Any])?["status"] as? String == "unknown")
         let dump = try await fixture.run(["config", "dump", "--json"])
         let text = try #require(String(data: dump, encoding: .utf8))
         #expect(text.contains("fixture-unavailable"))

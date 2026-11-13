@@ -40,7 +40,11 @@ private final class UpdateReadyUpdater: UpdaterProviding {
     var automaticallyDownloadsUpdates = false
     let isAvailable = true
     let unavailableReason: String? = nil
-    let updateStatus = UpdateStatus(isUpdateReady: true)
+    let updateStatus = UpdateStatus()
+
+    init() {
+        self.updateStatus.isUpdateReady = true
+    }
 
     func checkForUpdates(_: Any?) {}
     func installUpdate() {}
@@ -89,7 +93,7 @@ enum BlockingEnrichmentStage: Sendable {
 }
 
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, CodexCredentialFixtures())
 struct StatusMenuPersistentRefreshTests {
     private func makeSettings() -> SettingsStore {
         testSettingsStore(suiteName: "StatusMenuPersistentRefreshTests")
@@ -114,13 +118,16 @@ struct StatusMenuPersistentRefreshTests {
                 configRevision: settings.configRevision,
                 expiresAt: .distantFuture)
         }
-        return StatusItemController(
+        let controller = StatusItemController(
             store: store,
             settings: settings,
             account: account ?? AccountInfo(email: nil, plan: nil),
             updater: updater,
             preferencesSelection: PreferencesSelection(),
             statusBar: .system)
+        // These tests resolve visible cards directly without opening a native menu.
+        controller.menuCardRefreshMonitor.isActive = true
+        return controller
     }
 
     private static func isolatedEnvironment() -> [String: String] {

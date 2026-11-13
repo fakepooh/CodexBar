@@ -26,22 +26,22 @@ struct MenuBarLayoutProviderBalanceTests {
         // The legacy entry point must fall through to the selected allowance display mode.
         #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .notion, snapshot: snapshot) == nil)
         #expect(MenuBarLayoutBalanceResolver.legacyBalance(
-            provider: .notion, snapshot: snapshot, showOptionalUsage: false) == nil)
+            provider: .notion, snapshot: snapshot, showsOptionalCredits: false) == nil)
         #expect(data.automaticText == nil)
         #expect(self.render(layout: MenuBarLayout(lines: [[.balance]]), data: data)
             .attributedTitle.string == (balance ?? "–"))
         #expect(self.render(layout: MenuBarLayout(lines: [[.percent(window: .automatic)]]), data: data)
             .attributedTitle.string == "42%")
-        let hidden = self.data(provider: .notion, snapshot: snapshot, showOptionalUsage: false)
+        let hidden = self.data(provider: .notion, snapshot: snapshot, showsOptionalCredits: false)
         #expect(hidden.balance == nil)
         #expect(self.render(layout: MenuBarLayout(lines: [[.balance]]), data: hidden).attributedTitle.string == "–")
         #expect(self.render(layout: MenuBarLayout(lines: [[.percent(window: .automatic)]]), data: hidden)
             .attributedTitle.string == "42%")
-        let restored = self.data(provider: .notion, snapshot: snapshot, showOptionalUsage: true)
+        let restored = self.data(provider: .notion, snapshot: snapshot, showsOptionalCredits: true)
         #expect(restored.balance == balance)
         // Automatic's balance fallback must also filter stored optional details when no window exists.
         #expect(StatusItemController.menuBarLayoutAutomaticText(
-            provider: .notion, snapshot: snapshot, automatic: nil, showOptionalUsage: false) == nil)
+            provider: .notion, snapshot: snapshot, automatic: nil, showsOptionalCredits: false) == nil)
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .claude, snapshot: snapshot) == nil)
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .codex, snapshot: snapshot) == nil)
         #expect(!NotionProviderDescriptor.descriptor.metadata.supportsCredits)
@@ -60,6 +60,53 @@ struct MenuBarLayoutProviderBalanceTests {
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .notion, snapshot: balanceOnly) == balance)
     }
 
+    @Test
+    func `zai balance uses shared renderer without replacing subscription quotas`() throws {
+        let balance = try ProviderDetailSection(title: "Quota details", rows: [
+            .init(label: "Account balance", value: "¥8.66"),
+        ])
+        let snapshot = UsageSnapshot(primary: nil, secondary: nil, details: [balance], updatedAt: self.now)
+        #expect(self.data(provider: .zai, snapshot: snapshot).balance == "¥8.66")
+        #expect(self.data(provider: .zai, snapshot: snapshot).automaticText == "¥8.66")
+        let quota = UsageSnapshot(
+            primary: .init(usedPercent: 42, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            details: [balance],
+            updatedAt: self.now)
+        #expect(self.data(provider: .zai, snapshot: quota).balance == "¥8.66")
+        #expect(self.data(provider: .zai, snapshot: quota).automaticText == nil)
+    }
+
+    @Test
+    func `JetBrains top-up balance renders beside the unchanged monthly percentage`() throws {
+        let snapshot = try JetBrainsTopUpIntegrationTests.xml().toUsageSnapshot()
+        let data = self.data(provider: .jetbrains, snapshot: snapshot)
+        let output = self.render(
+            layout: MenuBarLayout(lines: [[.balance, .separatorDot, .percent(window: .automatic)]]), data: data)
+        if let path = ProcessInfo.processInfo.environment["CODEXBAR_JETBRAINS_BALANCE_PROOF"] {
+            let image = NSImage(size: NSSize(width: 420, height: 90))
+            image.lockFocus()
+            NSColor.white.setFill()
+            NSRect(x: 0, y: 0, width: 420, height: 90).fill()
+            ("JetBrains · Balance + monthly % used · synthetic" as NSString).draw(
+                at: NSPoint(x: 16, y: 60),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.black])
+            let title = NSMutableAttributedString(attributedString: output.attributedTitle)
+            title.addAttribute(
+                .foregroundColor,
+                value: NSColor.black,
+                range: NSRange(location: 0, length: title.length))
+            title.draw(at: NSPoint(x: 16, y: 24))
+            image.unlockFocus()
+            let tiff = try #require(image.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: tiff))
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
+        }
+        #expect(data.balance == "54.90 credits")
+        #expect(data.automaticText == nil)
+        #expect(output.attributedTitle.string == "54.90 credits\u{2009}·\u{2009}7%")
+    }
+
     @Test(arguments: BundledPluginTestSupport.engines)
     func `Nous reported credits reach balance and automatic tokens`(engine: ProviderPluginEngineKind) async throws {
         let snapshot = try await NousPluginTests.fetch(Self.nousCreditsAccount, engine: engine)
@@ -69,7 +116,7 @@ struct MenuBarLayoutProviderBalanceTests {
         #expect(data.balance == "$6.76")
         #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .nous, snapshot: snapshot) == "$6.76")
         #expect(data.automaticText == "$6.76")
-        let withoutOptionalUsage = self.data(provider: .nous, snapshot: snapshot, showOptionalUsage: false)
+        let withoutOptionalUsage = self.data(provider: .nous, snapshot: snapshot, showsOptionalCredits: false)
         #expect(withoutOptionalUsage.balance == data.balance)
         #expect(withoutOptionalUsage.automaticText == data.automaticText)
         for token: MenuBarLayoutToken in [.balance, .percent(window: .automatic)] {
@@ -159,7 +206,7 @@ struct MenuBarLayoutProviderBalanceTests {
 
     @Test
     func `TypeSafe plugin balance reaches automatic and explicit layout tokens`() async throws {
-        let snapshot = try await TypeSafePluginTests.fetch(engine: .quickJS)
+        let snapshot = try await TypeSafeTestFixture.fetch(engine: .quickJS)
         let data = self.data(provider: .typesafe, snapshot: snapshot)
         #expect(data.balance == "$4.98")
         #expect(data.automaticText == "$4.98")
@@ -255,7 +302,151 @@ struct MenuBarLayoutProviderBalanceTests {
         #expect(MenuBarLayoutBalanceResolver.balance(provider: provider, snapshot: snapshot) == nil)
     }
 
-    @Test(arguments: [UsageProvider.nous, .openrouter, .atlascloud, .vercel, .devpass])
+    @Test
+    func `declared prepaid balance reaches the balance token without a provider case`() throws {
+        // Claude's /prepaid/credits response, in minor units, parsed by the real web fetcher.
+        let prepaid = try #require(ClaudeWebAPIFetcher._parsePrepaidCreditsForTesting(
+            Data(#"{"amount":7665,"currency":"usd"}"#.utf8)))
+        let snapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 25, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            providerCost: prepaid,
+            updatedAt: self.now)
+        let data = self.data(provider: .claude, snapshot: snapshot)
+        if let path = ProcessInfo.processInfo.environment["CODEXBAR_CLAUDE_BALANCE_PROOF"] {
+            let output = self.render(
+                layout: MenuBarLayout(lines: [[.percent(window: .automatic), .separatorDot, .balance]]), data: data)
+            let image = NSImage(size: NSSize(width: 360, height: 90))
+            image.lockFocus()
+            NSColor.white.setFill()
+            NSRect(x: 0, y: 0, width: 360, height: 90).fill()
+            ("Claude · Auto % + Balance · synthetic" as NSString).draw(
+                at: NSPoint(x: 16, y: 60),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.black])
+            let title = NSMutableAttributedString(attributedString: output.attributedTitle)
+            title.addAttribute(
+                .foregroundColor,
+                value: NSColor.black,
+                range: NSRange(location: 0, length: title.length))
+            title.draw(at: NSPoint(x: 16, y: 24))
+            image.unlockFocus()
+            let tiff = try #require(image.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: tiff))
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
+        }
+        #expect(data.balance == "$76.65")
+        #expect(data.automaticText == nil)
+        #expect(self.render(layout: MenuBarLayout(lines: [[.balance]]), data: data).attributedTitle.string == "$76.65")
+        let combined = self.render(
+            layout: MenuBarLayout(lines: [[.percent(window: .automatic), .balance]]),
+            data: data).attributedTitle.string
+        #expect(combined.contains("25%"))
+        #expect(combined.contains("$76.65"))
+        #expect(MenuBarLayoutBalanceResolver.balanceAmountsUSD(provider: .claude, snapshot: snapshot).remaining
+            == 76.65)
+
+        let otherProvider = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            providerCost: snapshot.providerCost,
+            updatedAt: self.now,
+            identity: ProviderIdentitySnapshot(
+                providerID: UsageProvider.codex.instanceID,
+                accountEmail: nil,
+                accountOrganization: nil,
+                loginMethod: nil))
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .claude, snapshot: otherProvider) == nil)
+        #expect(MenuBarLayoutBalanceResolver.balanceAmountsUSD(provider: .claude, snapshot: otherProvider).remaining
+            == nil)
+
+        let withoutBalance = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            providerCost: ProviderCostSnapshot(used: 12, limit: 50, currencyCode: "USD", updatedAt: self.now),
+            updatedAt: self.now)
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .claude, snapshot: withoutBalance) == nil)
+    }
+
+    @Test
+    func `prepaid balance merged into a lowercase spend currency still feeds conditionals`() {
+        // The spend-limit response keeps its own currency casing when the prepaid balance merges into it.
+        let snapshot = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            providerCost: ProviderCostSnapshot(
+                used: 12,
+                limit: 50,
+                currencyCode: "usd",
+                balance: 76.65,
+                updatedAt: self.now),
+            updatedAt: self.now)
+        #expect(MenuBarLayoutBalanceResolver.balanceAmountsUSD(provider: .claude, snapshot: snapshot).remaining
+            == 76.65)
+    }
+
+    @Test
+    func `non USD prepaid balance renders without feeding dollar conditionals`() {
+        let snapshot = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            providerCost: ProviderCostSnapshot(
+                used: 12, limit: 50, currencyCode: "GBP", balance: 76.65, updatedAt: self.now),
+            updatedAt: self.now)
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: .claude, snapshot: snapshot) == "£76.65")
+        let amounts = MenuBarLayoutBalanceResolver.balanceAmountsUSD(provider: .claude, snapshot: snapshot)
+        #expect(amounts.remaining == nil)
+        #expect(amounts.used == nil)
+    }
+
+    @Test(arguments: [
+        (UsageProvider.grok, "–"), (.opencode, "–"), (.huggingface, "–"), (.replicate, "–"),
+        (.typesafe, "$4.98"), (.xapi, "$4.98"), (.openrouter, "$12.34"),
+    ])
+    func `existing provider balance output ignores unrelated prepaid cost`(provider: UsageProvider, expected: String)
+        throws
+    {
+        let snapshot = try UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            providerCost: ProviderCostSnapshot(
+                used: 0, limit: 0, currencyCode: "USD", balance: 76.65, updatedAt: self.now),
+            details: [ProviderDetailSection(rows: [
+                .init(label: "Balance", value: "$4.98"),
+                .init(label: "Remaining", value: "$12.34"),
+                .init(label: "Used", value: "$7.66"),
+            ])],
+            updatedAt: self.now,
+            identity: ProviderIdentitySnapshot(
+                providerID: provider.instanceID,
+                accountEmail: nil,
+                accountOrganization: nil,
+                loginMethod: "Balance: $4.98"))
+        let output = self.render(layout: MenuBarLayout(lines: [[.balance]]), data: self.data(
+            provider: provider, snapshot: snapshot)).attributedTitle.string
+        #expect(Array(output.utf8) == Array(expected.utf8))
+        let amounts = MenuBarLayoutBalanceResolver.balanceAmountsUSD(provider: provider, snapshot: snapshot)
+        #expect(amounts.remaining == (provider == .openrouter ? 12.34 : nil))
+        #expect(amounts.used == (provider == .openrouter ? 7.66 : nil))
+    }
+
+    @Test(arguments: [UsageProvider.grok, .opencode, .codex])
+    func `undeclared providers keep their prepaid cost balance out of the balance token`(provider: UsageProvider) {
+        let snapshot = UsageSnapshot(
+            primary: nil,
+            secondary: nil,
+            providerCost: ProviderCostSnapshot(
+                used: 0,
+                limit: 0,
+                currencyCode: "USD",
+                balance: 76.65,
+                updatedAt: self.now),
+            updatedAt: self.now)
+        #expect(MenuBarLayoutBalanceResolver.balance(provider: provider, snapshot: snapshot) == nil)
+        #expect(MenuBarLayoutBalanceResolver.balanceAmountsUSD(provider: provider, snapshot: snapshot).remaining
+            == nil)
+    }
+
+    @Test(arguments: [UsageProvider.nous, .openrouter, .atlascloud, .vercel, .devpass, .jetbrains])
     func `declared balance rows do not borrow identity text or another provider`(provider: UsageProvider) throws {
         let snapshot = UsageSnapshot(
             primary: nil,
@@ -348,7 +539,7 @@ struct MenuBarLayoutProviderBalanceTests {
     }
 
     private func data(
-        provider: UsageProvider, snapshot: UsageSnapshot, showOptionalUsage: Bool = true) -> MenuBarLayoutRenderData
+        provider: UsageProvider, snapshot: UsageSnapshot, showsOptionalCredits: Bool = true) -> MenuBarLayoutRenderData
     {
         let automatic = MenuBarLayoutRenderWindow(MenuBarMetricWindowResolver.rateWindow(
             preference: .automatic,
@@ -357,7 +548,7 @@ struct MenuBarLayoutProviderBalanceTests {
             supportsAverage: false,
             now: self.now))
         return MenuBarLayoutRenderData(
-            provider: provider,
+            provider: provider.instanceID,
             iconKey: provider.rawValue,
             providerName: provider.rawValue,
             accountLabel: nil,
@@ -371,13 +562,16 @@ struct MenuBarLayoutProviderBalanceTests {
             scopedWeeklyTitle: nil,
             automatic: automatic,
             automaticText: StatusItemController.menuBarLayoutAutomaticText(
-                provider: provider, snapshot: snapshot, automatic: automatic, showOptionalUsage: showOptionalUsage),
+                provider: provider,
+                snapshot: snapshot,
+                automatic: automatic,
+                showsOptionalCredits: showsOptionalCredits),
             sessionPace: nil,
             weeklyPace: nil,
             automaticPace: nil,
             runsOut: nil,
             balance: MenuBarLayoutBalanceResolver.balance(
-                provider: provider, snapshot: snapshot, showOptionalUsage: showOptionalUsage),
+                provider: provider, snapshot: snapshot, showsOptionalCredits: showsOptionalCredits),
             costToday: nil,
             cost30d: nil,
             metrics: .unavailable)

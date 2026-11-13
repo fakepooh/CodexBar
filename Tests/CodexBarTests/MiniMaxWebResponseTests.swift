@@ -3,6 +3,43 @@ import Testing
 @testable import CodexBarCore
 
 struct MiniMaxWebResponseTests {
+    @Test
+    func `next data accepts JSON whitespace and preserves fallback for an empty script`() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let json = """
+        {"modelRemains":[{"current_interval_total_count":100,"current_interval_usage_count":75}],
+         "currentSubscribeTitle":"Max"}
+        """
+        let html = "<script id=\"__NEXT_DATA__\"> \t\r\n\(json)\r\n\t </script>"
+        #expect(try MiniMaxUsageParser.parse(html: html, now: now).planName == "Max")
+        let empty = "<script id=\"__NEXT_DATA__\"> \t\r\n </script><div>Coding Plan Pro</div>"
+        #expect(try MiniMaxUsageParser.parse(html: empty, now: now).planName == "Pro")
+    }
+
+    @Test
+    func `next data aliases preserve snake case precedence and nested payloads`() throws {
+        let payload = try MiniMaxUsageParser.decodePayload(json: ["data": [
+            "modelRemains": [],
+            "currentSubscribeTitle": "Current",
+            "plan_name": "Original",
+            "planName": "Alias",
+            "comboTitle": "Combo",
+            "currentPlanTitle": "Plan",
+            "currentComboCard": ["title": "Card"],
+            "baseResp": ["status_code": 0],
+            "pointsBalance": 12.5,
+            "creditsBalance": 25,
+        ]])
+        #expect(payload.data.modelRemains.isEmpty)
+        #expect(payload.data.currentSubscribeTitle == "Current")
+        #expect(payload.data.planName == "Original")
+        #expect(payload.data.comboTitle == "Combo")
+        #expect(payload.data.currentPlanTitle == "Plan")
+        #expect(payload.data.currentComboCard?.title == "Card")
+        #expect(payload.data.baseResp?.statusCode == 0)
+        #expect(payload.data.pointsBalance == 12.5)
+    }
+
     @Test(arguments: [false, true])
     func `page and remains requests preserve headers and JSON quota parsing`(fallback: Bool) async throws {
         let now = Date(timeIntervalSince1970: 1_780_282_340)
@@ -12,13 +49,13 @@ struct MiniMaxWebResponseTests {
                 #expect(request.value(forHTTPHeaderField: "x-group-id") == "fixture-group")
                 throw URLError(.resourceUnavailable)
             }
-            let isPage = url.path.contains("coding-plan")
+            let isPage = url.path == "/console/usage"
             #expect(request.httpMethod == "GET")
             #expect(request.value(forHTTPHeaderField: "Cookie") == "HERTZ-SESSION=fixture")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-token")
-            #expect(request.value(forHTTPHeaderField: "origin") == "https://platform.minimaxi.com")
+            #expect(request.value(forHTTPHeaderField: "origin") == "https://platform.minimax.cn")
             #expect(request.value(forHTTPHeaderField: "referer") ==
-                "https://platform.minimaxi.com/user-center/payment/coding-plan")
+                "https://platform.minimax.cn/console/usage")
             #expect(request.value(forHTTPHeaderField: "accept-language") == "en-US,en;q=0.9")
             #expect(request.value(forHTTPHeaderField: "user-agent")?.contains("Chrome/143.0.0.0") == true)
             #expect(request.value(forHTTPHeaderField: "accept") == (isPage
@@ -26,8 +63,7 @@ struct MiniMaxWebResponseTests {
                     : "application/json, text/plain, */*"))
             #expect(request.value(forHTTPHeaderField: "x-requested-with") == (isPage ? nil : "XMLHttpRequest"))
             if !isPage {
-                #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
-                    .contains(URLQueryItem(name: "GroupId", value: "fixture-group")) == true)
+                #expect(request.value(forHTTPHeaderField: "X-Group-Id") == "fixture-group")
             }
             let needsFallback = fallback && isPage
             let body = needsFallback ? "<html>fixture without usage</html>" : Self.usageJSON
@@ -56,7 +92,7 @@ struct MiniMaxWebResponseTests {
     func `page and remains failures preserve HTTP error classification`(fallback: Bool, statusCode: Int) async {
         let transport = ProviderHTTPTransportStub { request in
             let url = request.url!
-            let needsFallback = fallback && url.path.contains("coding-plan")
+            let needsFallback = fallback && url.path == "/console/usage"
             let response = HTTPURLResponse(
                 url: url,
                 statusCode: needsFallback ? 200 : statusCode,

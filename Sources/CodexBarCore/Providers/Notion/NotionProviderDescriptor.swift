@@ -42,8 +42,7 @@ public enum NotionProviderDescriptor {
                 isPrimaryProvider: false,
                 usesAccountFallback: false,
                 sharePlanLabels: ["free": "Free", "plus": "Plus", "business": "Business", "enterprise": "Enterprise"],
-                browserCookieOrder: BrowserCookieImportSupport.chromeOnly(
-                    reason: "Avoid probing unrelated browser stores"),
+                browserCookieOrder: ProviderBrowserCookieDefaults.defaultImportOrder,
                 dashboardURL: "https://app.notion.com/",
                 statusPageURL: nil,
                 statusLinkURL: "https://status.notion.so/"),

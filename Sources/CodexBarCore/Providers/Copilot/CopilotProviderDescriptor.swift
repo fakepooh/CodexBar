@@ -47,8 +47,7 @@ public enum CopilotProviderDescriptor {
                     "enterprise": "Enterprise",
                 ],
                 debugLogUnavailableMessage: "Copilot debug log not yet implemented",
-                browserCookieOrder: BrowserCookieImportSupport.chromeOnly(
-                    reason: "Budget imports must not prompt unrelated browsers"),
+                browserCookieOrder: ProviderBrowserCookieDefaults.defaultImportOrder,
                 dashboardURL: "https://github.com/settings/copilot",
                 statusPageURL: "https://www.githubstatus.com/"),
             branding: ProviderBranding(
@@ -79,11 +78,10 @@ public enum CopilotProviderDescriptor {
                 },
                 automaticSelectionPrioritizesExhaustedWindow: false,
                 menuBarWindowResolver: { context in
-                    guard context.metric == .automatic,
-                          let primary = context.snapshot.primary,
-                          let secondary = context.snapshot.secondary
-                    else { return .unhandled }
-                    return .resolved(primary.usedPercent >= secondary.usedPercent ? primary : secondary)
+                    guard context.metric == .automatic else { return .unhandled }
+                    return .automaticCandidates([
+                        context.snapshot.primary, context.snapshot.secondary,
+                    ].compactMap(\.self))
                 },
                 switcherUsedPercentFallback: { snapshot in
                     snapshot.detailRow(id: CopilotCreditDetailRows.seatRowID)?.progress?.usedPercent
@@ -94,7 +92,46 @@ public enum CopilotProviderDescriptor {
                 pipeline: ProviderFetchPipeline(resolveStrategies: { _ in [CopilotAPIFetchStrategy()] })),
             cli: ProviderCLIConfig(
                 name: "copilot",
-                versionDetector: nil))
+                loginCommand: "codexbar config login --provider copilot",
+                versionDetector: nil),
+            setup: ProviderSetup(
+                routes: [
+                    .init(
+                        id: "device-login",
+                        method: .deviceCode,
+                        platforms: [.macOS, .linux],
+                        command: "codexbar config login --provider copilot",
+                        hint: "Authorize GitHub's device code to save a Copilot token account."),
+                    .init(
+                        id: "github-token",
+                        method: .token,
+                        platforms: [.macOS, .linux],
+                        requiredInputs: [.init(
+                            id: "github-token",
+                            configFields: ["apiKey", "tokenAccounts.accounts[].token"],
+                            environmentVariables: ["COPILOT_API_TOKEN"])],
+                        hint: "Supply a GitHub token accepted by the Copilot usage API."),
+                ],
+                optionalCapabilities: [.init(
+                    id: "budget-extras",
+                    hint: "Optional, best-effort budgets for public github.com only. " +
+                        "Enable Budget extras in the macOS app; the browser session must match the token account. " +
+                        "Quota usage does not need cookies.",
+                    routes: [
+                        .init(
+                            id: "manual-cookie",
+                            method: .cookieHeader,
+                            platforms: [.macOS],
+                            requiredInputs: [.init(id: "github-cookie", configFields: ["cookieHeader"])],
+                            hint: "In the macOS app, select manual cookie source and supply the matching " +
+                                "GitHub Cookie header."),
+                        .init(
+                            id: "browser-session",
+                            method: .browserSession,
+                            platforms: [.macOS],
+                            hint: "Sign in to GitHub in a supported browser and select automatic cookie import " +
+                                "in the macOS app."),
+                    ])]))
     }
 }
 

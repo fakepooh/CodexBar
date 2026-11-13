@@ -8,6 +8,83 @@ import UniformTypeIdentifiers
 
 struct MenuBarLayoutEditorTests {
     @Test
+    func `Cursor reset chips name the account window without borrowing Grok Bot resets`() {
+        CodexBarLocalizationOverride.$appLanguage.withValue("en") {
+            let now = Date(timeIntervalSince1970: 1_793_000_000)
+            let monthly = UsageSnapshot(
+                primary: RateWindow(usedPercent: 20, windowMinutes: 43200, resetsAt: now, resetDescription: nil),
+                secondary: RateWindow(usedPercent: 30, windowMinutes: 43200, resetsAt: now, resetDescription: nil),
+                extraRateWindows: [NamedRateWindow(
+                    id: "cursor-grok-bot",
+                    title: "Grok Bot",
+                    window: RateWindow(
+                        usedPercent: 14,
+                        windowMinutes: 10080,
+                        resetsAt: now.addingTimeInterval(86400 * 3),
+                        resetDescription: nil))],
+                updatedAt: now)
+            let weekly = UsageSnapshot(
+                primary: RateWindow(usedPercent: 40, windowMinutes: 10080, resetsAt: now, resetDescription: nil),
+                secondary: nil,
+                cursorHasUnifiedWeeklyPool: true,
+                updatedAt: now)
+            let countdown = MenuBarLayoutToken.windowResetCountdown(window: .weekly)
+            let absolute = MenuBarLayoutToken.windowResetAbsolute(window: .weekly)
+            #expect(countdown.editorLabel(provider: .cursor, snapshot: monthly) == "Cursor: Resets in")
+            #expect(absolute.editorAccessibilityLabel(provider: .cursor, snapshot: monthly) == "Cursor: Reset at")
+            #expect(countdown.editorLabel(provider: .cursor, snapshot: weekly) == "Weekly: Resets in")
+            #expect(absolute.editorAccessibilityLabel(provider: .cursor, snapshot: weekly) == "Weekly: Reset at")
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func `a flagless seven day Cursor billing window keeps account reset labels`(hasIndependentBot: Bool) {
+        CodexBarLocalizationOverride.$appLanguage.withValue("en") {
+            let now = Date(timeIntervalSince1970: 1_793_000_000)
+            let independentBot = NamedRateWindow(
+                id: CursorSandUsageStatus.extraWindowID,
+                title: CursorSandUsageStatus.extraWindowTitle,
+                window: RateWindow(
+                    usedPercent: 80,
+                    windowMinutes: 10080,
+                    resetsAt: now.addingTimeInterval(3 * 86400),
+                    resetDescription: nil))
+            let snapshot = UsageSnapshot(
+                primary: RateWindow(usedPercent: 20, windowMinutes: 10080, resetsAt: now, resetDescription: nil),
+                secondary: nil,
+                extraRateWindows: hasIndependentBot ? [independentBot] : nil,
+                updatedAt: now)
+            let countdown = MenuBarLayoutToken.windowResetCountdown(window: .weekly)
+            let absolute = MenuBarLayoutToken.windowResetAbsolute(window: .weekly)
+            #expect(countdown.editorLabel(provider: .cursor, snapshot: snapshot) == "Cursor: Resets in")
+            #expect(absolute.editorAccessibilityLabel(provider: .cursor, snapshot: snapshot) == "Cursor: Reset at")
+            #expect(snapshot.primary?.usedPercent == 20)
+            #expect(snapshot.extraRateWindows?.first?.window.usedPercent == (hasIndependentBot ? 80 : nil))
+        }
+    }
+
+    @Test
+    func `separator accessibility speaks names instead of punctuation`() {
+        CodexBarLocalizationOverride.$appLanguage.withValue("en") {
+            #expect(MenuBarLayoutToken.separator(.pipe).editorAccessibilityLabel(provider: nil)
+                == "Separator Vertical bar")
+            #expect(MenuBarLayoutToken.separator(.slash).editorAccessibilityLabel(provider: nil)
+                == "Separator Slash")
+        }
+    }
+
+    @Test
+    func `saved history cost item uses the history window label`() throws {
+        try CodexBarLocalizationOverride.$appLanguage.withValue("en") {
+            let token = try JSONDecoder().decode(MenuBarLayoutToken.self, from: Data(#"{"cost30d":{}}"#.utf8))
+            let metric = try JSONDecoder().decode(MenuBarConditionalMetric.self, from: Data(#""cost30d""#.utf8))
+            #expect(token.editorLabel(provider: nil) == "Cost (History window)")
+            #expect(token.editorAccessibilityLabel(provider: nil) == "Cost (History window)")
+            #expect(metric.editorLabel(provider: nil) == "Cost (History window)")
+        }
+    }
+
+    @Test
     @MainActor
     func `all scope discloses only enabled saved overrides in provider order including equal layouts`() throws {
         let settings = try Self.overrideSettings()
@@ -96,6 +173,32 @@ struct MenuBarLayoutEditorTests {
     }
 
     @Test
+    func `cost window token is named after the history window`() {
+        for provider in [nil, UsageProvider.codex] {
+            #expect(MenuBarLayoutToken.costWindow.editorLabel(provider: provider) == "Cost (History window)")
+            #expect(MenuBarLayoutToken.costWindow.editorAccessibilityLabel(provider: provider)
+                == "Cost (History window)")
+        }
+        #expect(MenuBarLayoutToken.costToday.editorLabel(provider: nil) == "Cost today")
+    }
+
+    @Test
+    func `cost window conditional metric is named after the history window`() {
+        #expect(MenuBarConditionalMetric.costWindow.editorLabel(provider: nil) == "Cost (History window)")
+        let conditional = MenuBarLayoutConditional(
+            clauses: [MenuBarConditionalClause(
+                combinator: nil,
+                predicate: MenuBarConditionalPredicate(
+                    metric: .costWindow,
+                    comparison: .greaterThanOrEqual,
+                    threshold: 5))],
+            thenToken: .costWindow,
+            elseToken: .hidden)
+        #expect(conditional.editorSummary(provider: nil)
+            == "If Cost (History window) >= 5 USD then Cost (History window) else Hide")
+    }
+
+    @Test
     func `Cursor exposes Grok Bot after its named window is available`() {
         let grokBot = NamedRateWindow(
             id: "cursor-grok-bot",
@@ -107,19 +210,53 @@ struct MenuBarLayoutEditorTests {
             .percent(window: .session),
             .percent(window: .weekly),
             .percent(window: .scopedWeekly),
+            .percent(window: .spend),
             .lanePercent(lane: .primary),
             .lanePercent(lane: .secondary),
             .extraPercent(id: "cursor-grok-bot"),
             .percent(window: .automatic),
             .usageBar,
+            .progressBar(window: .session),
+            .progressBar(window: .weekly),
+            .progressBar(window: .scopedWeekly),
+            .progressBar(window: .automatic),
+            .tokensPerMinute,
+            .tokensSparkline,
             .pace(window: .session),
             .pace(window: .weekly),
             .pace(window: .automatic),
+            .pace(window: .spend),
         ])
+        #expect(MenuBarLayoutPaletteTokens.conditionalBranch.contains(.progressBar(window: .scopedWeekly)))
         #expect(!MenuBarLayoutPaletteTokens.usage(provider: .codex, snapshot: cursor)
             .contains(.extraPercent(id: "cursor-grok-bot")))
         #expect(!MenuBarLayoutPaletteTokens.usage(provider: .cursor, snapshot: nil)
             .contains(.extraPercent(id: "cursor-grok-bot")))
+    }
+
+    @Test
+    func `spend tokens are in the layout and conditional palettes`() {
+        let spendUsage: [MenuBarLayoutToken] = [.percent(window: .spend), .pace(window: .spend)]
+        let spendTime: [MenuBarLayoutToken] = [
+            .windowResetCountdown(window: .spend), .windowResetAbsolute(window: .spend),
+        ]
+        let spendMoney: [MenuBarLayoutToken] = [.spendAmount, .spendBudget]
+        #expect(spendUsage.allSatisfy(MenuBarLayoutPaletteTokens.usage(provider: .codex, snapshot: nil).contains))
+        #expect(spendTime.allSatisfy(MenuBarLayoutPaletteTokens.time.contains))
+        let branch = MenuBarLayoutPaletteTokens.conditionalBranch
+        #expect((spendUsage + spendTime + spendMoney).allSatisfy(branch.contains))
+    }
+
+    @Test
+    func `every separator glyph is a conditional branch choice with a glyph label`() {
+        let branch = MenuBarLayoutPaletteTokens.conditionalBranch
+        #expect(branch.contains(.separatorDot))
+        for separator in MenuBarLayoutSeparator.allCases {
+            let token = MenuBarLayoutToken.separator(separator)
+            #expect(branch.contains(token))
+            #expect(token.editorLabel(provider: nil, snapshot: nil) == separator.glyph)
+            #expect(token.editorAccessibilityLabel(provider: nil).contains(separator.accessibilityName))
+        }
     }
 
     @Test

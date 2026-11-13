@@ -1,6 +1,11 @@
 import Foundation
 
 extension CostUsageStore {
+    struct DecodedCodexUsageRows {
+        var rowsByPath: [String: [CostUsageScanner.CodexUsageRow]] = [:]
+        var rowCounts: [String: Int] = [:]
+    }
+
     /// Only the actor can resolve this receipt. It carries no decoded state or SQLite handle.
     final class CodexBaselineReceipt: Sendable {
         fileprivate let id = UUID()
@@ -62,6 +67,7 @@ extension CostUsageStore {
         var persistence: CodexPersistenceState
         var stamp: DatabaseStamp
         var purpose: CostUsageStoreReadPurpose
+        var source: OpenCodeLocalHistoryAdapter.StoredSummary?
     }
 
     func loadCodexScan(calendar: Calendar) -> CostUsageStoreLoad {
@@ -155,10 +161,16 @@ extension CostUsageStore {
         let recorder = self.scopedReadWorkRecorderForTesting
         let snapshot = try Self.readSnapshot(
             database,
+            home: self.home,
             loadTokenSnapshots: loadTokenSnapshots,
             loadUsageRows: false,
+            nativeOnly: true,
             recorder: recorder)
-        let rows = try Self.readDecodedCodexUsageRows(database, files: snapshot.files, recorder: recorder)
+        let rows = try Self.readDecodedCodexUsageRows(
+            database,
+            files: snapshot.files,
+            home: self.home,
+            recorder: recorder)
         return (snapshot, rows)
     }
 
@@ -192,7 +204,7 @@ extension CostUsageStore {
         self.currentDatabaseStamp() == baseline.stamp
     }
 
-    /// Retention may rewrite identical metadata when a protected window exceeds the budget.
+    /// Retention may prune history or change its window bounds.
     /// Only those own writes permit a fresh locked semantic comparison; external changes retry.
     func codexBaselineAfterRetention(_ baseline: CodexDecodedBaseline) -> CodexDecodedBaseline? {
         self.withDatabase(default: nil) { database in

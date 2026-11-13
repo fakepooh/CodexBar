@@ -30,6 +30,31 @@ struct CostUsageClaudeWriteAmplificationTests {
     }
 
     @Test
+    func `one row appends preserve reports after reloading shards`() throws {
+        let fixture = try Fixture(rowCount: 24000)
+        defer { fixture.env.cleanup() }
+        let initial = try fixture.load(context: .spendDashboard)
+        let source = fixture.env.claudeProjectsRoot.appendingPathComponent("session.jsonl")
+        var reports: [CostUsageDailyReport] = []
+        for cycle in 1...12 {
+            let handle = try FileHandle(forWritingTo: source)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(fixture.event(index: 24000 + cycle).utf8))
+            try handle.close()
+            let report = try fixture.load(context: .spendDashboard, cycle: cycle)
+            #expect(report.summary?.totalInputTokens == (initial.summary?.totalInputTokens ?? 0) + cycle * 10)
+            reports.append(report)
+        }
+        CostUsageScanner.evictClaudeReportMemoForTesting(
+            provider: .claude, cacheRoot: fixture.env.cacheRoot, reportContext: .spendDashboard)
+        CostUsageClaudeCacheIO.evictArtifactMemoForTesting(at: fixture.cacheURL(context: .spendDashboard))
+        let cold = try fixture.load(context: .spendDashboard, cycle: 13)
+        #expect(cold.data == reports.last?.data)
+        #expect(cold.hourly == reports.last?.hourly)
+        #expect(cold.quotaSlices == reports.last?.quotaSlices)
+    }
+
+    @Test
     func `identical explicit saves preserve artifact stamps`() throws {
         let fixture = try Fixture(rowCount: 2)
         defer { fixture.env.cleanup() }
@@ -43,6 +68,8 @@ struct CostUsageClaudeWriteAmplificationTests {
             let saved = try CostUsageClaudeCacheIO.save(
                 provider: .claude, cache: cache, cacheRoot: fixture.env.cacheRoot)
             #expect(saved == before[0])
+        }
+        for _ in 0..<3 {
             CostUsageClaudeReportMemo.shared.store(
                 provider: .claude,
                 canonicalCachePath: cacheURL.path,
@@ -87,24 +114,23 @@ struct CostUsageClaudeWriteAmplificationTests {
     }
 
     @Test
-    func `unchanged saves survive decoded artifact eviction without encoding`() throws {
+    func `evicted snapshots rebuild once then reuse unchanged saves`() throws {
         let fixture = try Fixture(rowCount: 128)
         defer { fixture.env.cleanup() }
         _ = try fixture.load(context: .regular)
         let url = fixture.cacheURL(context: .regular)
         let cache = CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot)
-        let before = try fixture.stamps(context: .regular)
+        CostUsageClaudeCacheIO.evictArtifactMemoForTesting(at: url)
         let recorder = CostUsageScanner.ClaudeScanWorkRecorder()
         try CostUsageScanner.withClaudeScanWorkRecorderForTesting(recorder) {
             for _ in 0..<3 {
-                CostUsageClaudeCacheIO.evictArtifactMemoForTesting(at: url)
                 _ = try CostUsageClaudeCacheIO.save(provider: .claude, cache: cache, cacheRoot: fixture.env.cacheRoot)
             }
         }
-        #expect(recorder.snapshot().cacheEncodes == 0)
+        #expect(recorder.snapshot().cacheEncodes == 1)
         #expect(recorder.persistenceSnapshot().reads == 0)
-        #expect(recorder.persistenceSnapshot().writes == 0)
-        #expect(try fixture.stamps(context: .regular) == before)
+        #expect(recorder.persistenceSnapshot().writes == 1)
+        #expect(CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot).usage == cache.usage)
     }
 
     @Test
@@ -124,7 +150,7 @@ struct CostUsageClaudeWriteAmplificationTests {
         #expect(recorder.snapshot().cacheEncodes == 1)
         #expect(recorder.persistenceSnapshot().writes == 1)
         #expect(recorder.persistenceSnapshot().reads == 0)
-        let decoded = try JSONDecoder().decode(CostUsageClaudeCache.self, from: Data(contentsOf: url))
+        let decoded = CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot)
         #expect(decoded.usage == cache.usage)
         #expect(decoded.sourceFileIDs == cache.sourceFileIDs)
 
@@ -196,7 +222,7 @@ struct CostUsageClaudeWriteAmplificationTests {
     }
 
     @Test
-    func `legacy sorted JSON loads and rebuilt identical content preserves stamps`() throws {
+    func `legacy sorted JSON migrates once without changing decoded content`() throws {
         let fixture = try Fixture(rowCount: 2)
         defer { fixture.env.cleanup() }
         _ = try fixture.load(context: .regular)
@@ -224,10 +250,11 @@ struct CostUsageClaudeWriteAmplificationTests {
             }
         }
         #expect(recorder.snapshot().cacheEncodes == 1)
-        #expect(recorder.persistenceSnapshot().writes == 0)
+        #expect(recorder.persistenceSnapshot().writes == 1)
         #expect(recorder.persistenceSnapshot().reads == 0)
-        #expect(CostUsageClaudeFileStamp.read(at: url) == before)
-        #expect(try Data(contentsOf: url) == legacyBytes)
+        #expect(CostUsageClaudeFileStamp.read(at: url) != before)
+        #expect(try encoder.encode(CostUsageClaudeCacheIO.load(
+            provider: .claude, cacheRoot: fixture.env.cacheRoot)) == legacyBytes)
     }
 
     @Test
@@ -262,6 +289,8 @@ struct CostUsageClaudeWriteAmplificationTests {
         let fixture = try Fixture(rowCount: 128)
         defer { fixture.env.cleanup() }
         _ = try fixture.load(context: .regular)
+        // Publication released the rows; warm an explicit artifact cycle before measuring its reuse.
+        _ = CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot)
         let recorder = CostUsageScanner.ClaudeScanWorkRecorder()
         try CostUsageScanner.withClaudeScanWorkRecorderForTesting(recorder) {
             for cycle in 1...3 {
@@ -301,7 +330,7 @@ struct CostUsageClaudeWriteAmplificationTests {
         let url = fixture.cacheURL(context: .regular)
         try JSONEncoder().encode(replacement).write(to: url, options: .atomic)
         _ = try CostUsageClaudeCacheIO.save(provider: .claude, cache: cache, cacheRoot: fixture.env.cacheRoot)
-        let restored = try JSONDecoder().decode(CostUsageClaudeCache.self, from: Data(contentsOf: url))
+        let restored = CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot)
         #expect(restored.usage == cache.usage)
         #expect(restored.sourceFileIDs == cache.sourceFileIDs)
     }
@@ -324,8 +353,7 @@ struct CostUsageClaudeWriteAmplificationTests {
                 CostUsageScanner.ClaudeUsageRow.self,
                 from: data)]
             _ = try CostUsageClaudeCacheIO.save(provider: .claude, cache: cache, cacheRoot: fixture.env.cacheRoot)
-            let stored = try JSONDecoder().decode(
-                CostUsageClaudeCache.self, from: Data(contentsOf: fixture.cacheURL(context: .regular)))
+            let stored = CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot)
             #expect(stored.usage.files[path]?.claudeRows?.first?.model.utf8.elementsEqual(model.utf8) == true)
         }
     }
@@ -336,7 +364,8 @@ struct CostUsageClaudeWriteAmplificationTests {
         defer { fixture.env.cleanup() }
         let initial = try fixture.load(context: .regular)
         let url = fixture.cacheURL(context: .regular)
-        var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let cache = CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(cache)) as? [String: Any])
         object["version"] = 3
         var files = try #require(object["files"] as? [String: [String: Any]])
         let path = try #require(files.keys.first)
@@ -358,7 +387,7 @@ struct CostUsageClaudeWriteAmplificationTests {
         #expect(upgraded.quotaSlices == initial.quotaSlices)
         #expect(recorder.snapshot().transcriptParses == 1)
         #expect(recorder.snapshot().incrementalTranscriptParses == 0)
-        #expect(CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot).usage.version == 4)
+        #expect(CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot).usage.version == 5)
     }
 
     @Test
@@ -390,6 +419,32 @@ struct CostUsageClaudeWriteAmplificationTests {
         let cold = try fixture.load(context: .regular, cycle: 3)
         #expect(cold.data == changed.data)
         #expect(cold.quotaSlices == changed.quotaSlices)
+    }
+
+    @Test
+    func `cancellation after private output preserves the target and removes temporary artifacts`() throws {
+        let fixture = try Fixture(rowCount: 128)
+        defer { fixture.env.cleanup() }
+        _ = try fixture.load(context: .regular)
+        let url = fixture.cacheURL(context: .regular)
+        let original = try Data(contentsOf: url)
+        var cache = CostUsageClaudeCacheIO.load(provider: .claude, cacheRoot: fixture.env.cacheRoot)
+        cache.usage.lastScanUnixMs += 1
+        var checks = 0
+        #expect(throws: CancellationError.self) {
+            try CostUsageClaudeCacheIO.save(
+                provider: .claude,
+                cache: cache,
+                cacheRoot: fixture.env.cacheRoot,
+                checkCancellation: {
+                    checks += 1
+                    if checks == 3 { throw CancellationError() }
+                })
+        }
+        #expect(checks == 3)
+        #expect(try Data(contentsOf: url) == original)
+        let files = try FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)
+        #expect(!files.contains { $0.hasPrefix(".claude-cache-") })
     }
 
     @Test
@@ -573,6 +628,74 @@ struct CostUsageClaudeWriteAmplificationTests {
                 options: options,
                 reportContext: context,
                 checkCancellation: nil)
+        }
+    }
+}
+
+extension CostUsageClaudeWriteAmplificationTests {
+    @Test
+    func `publishing a report releases cached source rows without cooling report reuse`() throws {
+        let fixture = try Fixture(rowCount: 128)
+        defer { fixture.env.cleanup() }
+        let initial = try fixture.load(context: .spendDashboard)
+        let url = fixture.cacheURL(context: .spendDashboard).standardizedFileURL.resolvingSymlinksInPath()
+        let memo = try #require(CostUsageClaudeReportMemo.shared.entry(
+            provider: .claude, canonicalCachePath: url.path))
+        let file = try self.cachedFileLifetime(fixture)
+        #expect(file.isAlive)
+        let before = try fixture.stamps(context: .spendDashboard)
+
+        let work = CostUsageScanner.ClaudeScanWorkRecorder()
+        CostUsageScanner.withClaudeScanWorkRecorderForTesting(work) {
+            _ = CostUsageClaudeReportMemo.shared.store(
+                provider: .claude,
+                canonicalCachePath: url.path,
+                sourceInventory: memo.sourceInventory,
+                reportKey: memo.reportKey,
+                report: memo.report,
+                hasWindowScopedRows: memo.hasWindowScopedRows)
+        }
+        #expect(!file.isAlive)
+
+        let cached = try CostUsageScanner.withClaudeScanWorkRecorderForTesting(work) {
+            try fixture.load(context: .spendDashboard, cycle: 1)
+        }
+        #expect(cached.data == initial.data)
+        #expect(cached.summary == initial.summary)
+        #expect(cached.hourly == initial.hourly)
+        #expect(cached.quotaSlices == initial.quotaSlices)
+        CostUsageScanner.withClaudeScanWorkRecorderForTesting(work) {
+            _ = CostUsageClaudeReportMemo.shared.store(
+                provider: .claude,
+                canonicalCachePath: url.path,
+                sourceInventory: memo.sourceInventory,
+                reportKey: memo.reportKey,
+                report: memo.report,
+                hasWindowScopedRows: memo.hasWindowScopedRows)
+        }
+        #expect(work.snapshot() == CostUsageScanner.ClaudeScanWorkMetrics())
+        #expect(work.persistenceSnapshot().reads == 0)
+        #expect(work.persistenceSnapshot().writes == 0)
+        #expect(try fixture.stamps(context: .spendDashboard) == before)
+    }
+
+    private func cachedFileLifetime(_ fixture: Fixture) throws -> FileLifetime {
+        try autoreleasepool {
+            let cache = CostUsageClaudeCacheIO.load(
+                provider: .claude, cacheRoot: fixture.env.cacheRoot, reportContext: .spendDashboard)
+            let (_, files) = try cache.split()
+            return try FileLifetime(#require(files.values.first))
+        }
+    }
+
+    private final class FileLifetime {
+        private weak var file: CostUsageClaudeCache.File?
+        var isAlive: Bool {
+            self.file != nil
+        }
+
+        init(_ file: CostUsageClaudeCache.File) {
+            self.file = file
         }
     }
 }
