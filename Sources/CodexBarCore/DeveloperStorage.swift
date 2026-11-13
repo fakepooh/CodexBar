@@ -3,12 +3,12 @@ import Foundation
 /// Separates developer app state from the released app, including bundled helpers.
 public enum DeveloperStorage {
     public static let isDeveloper: Bool = {
-        if self.isDeveloperBundleID(Bundle.main.bundleIdentifier) { return true }
+        if DeveloperStorage.isDeveloperBundleID(Bundle.main.bundleIdentifier) { return true }
         guard let executable = Bundle.main.executableURL else { return false }
         var directory = executable.deletingLastPathComponent()
         for _ in 0..<6 {
             if directory.pathExtension == "app",
-               self.isDeveloperBundleID(Bundle(url: directory)?.bundleIdentifier)
+               DeveloperStorage.isDeveloperBundleID(Bundle(url: directory)?.bundleIdentifier)
             {
                 return true
             }
