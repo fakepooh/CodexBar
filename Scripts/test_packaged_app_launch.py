@@ -3,6 +3,7 @@
 
 import json
 import os
+import plistlib
 from pathlib import Path
 import re
 import subprocess
@@ -13,7 +14,13 @@ import unittest
 
 
 class PackagedAppLaunchTests(unittest.TestCase):
-    def test_all_launches_isolate_ambient_accounts_and_normal_launch_mode(self):
+    def test_release_bundle_isolation(self):
+        self.exercise_bundle("com.steipete.codexbar")
+
+    def test_developer_bundle_isolation(self):
+        self.exercise_bundle("com.steipete.codexbar.debug")
+
+    def exercise_bundle(self, bundle_id):
         script = Path(__file__).with_name("verify_packaged_app_launch.sh")
         with tempfile.TemporaryDirectory(prefix="codexbar-launch-fixture-") as directory:
             root = Path(directory)
@@ -27,6 +34,7 @@ class PackagedAppLaunchTests(unittest.TestCase):
             stubs.mkdir()
             app = root / "CodexBar.app"
             (app / "Contents/Helpers/CodexBar_CodexBarCore.bundle").mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": bundle_id}))
             child = f"#!{sys.executable}\n" + textwrap.dedent(f"""\
                 import json, os, sys, time
                 from pathlib import Path
@@ -48,7 +56,7 @@ class PackagedAppLaunchTests(unittest.TestCase):
                 assert ('SWIFT_TESTING' not in os.environ) if webkit else os.environ['SWIFT_TESTING'] == '1'
                 if webkit:
                     assert os.environ['CODEXBAR_DISABLE_KEYCHAIN_ACCESS'] == '1'
-                    stores = home / 'Library/WebKit/com.steipete.codexbar/WebsiteDataStore'
+                    stores = home / 'Library/WebKit' / {bundle_id!r} / 'WebsiteDataStore'
                     assert (stores / '11111111-1111-4111-8111-111111111111').is_dir()
                 for key in ['CODEXBAR_SUPPRESS_TEST_KEYCHAIN_ACCESS',
                             'CODEXBAR_TEST_CODEX_FILE_ISOLATION', 'CODEXBAR_TEST_SESSION_FILE_ISOLATION']:
