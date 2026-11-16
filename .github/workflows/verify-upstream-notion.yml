@@ -1,0 +1,63 @@
+name: Verify upstream Notion PR
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - name: Resolve upstream PR head
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pr="$(gh api repos/steipete/CodexBar/pulls/5102)"
+          jq -e '.state == "open" and .base.ref == "main" and .base.repo.full_name == "steipete/CodexBar" and .head.repo.full_name == "fakepooh/CodexBar" and .head.ref == "feat/notion-three-credit-pools-upstream"' <<< "$pr" >/dev/null
+          sha="$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' <<< "$pr")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: fakepooh/CodexBar
+          ref: ${{ steps.pr.outputs.sha }}
+          persist-credentials: false
+      - name: Build and verify CLI
+        env:
+          SOURCE_SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          [[ "$(uname -m)" == arm64 ]]
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          [[ "$(xcodebuild -version)" == Xcode\ 27* ]]
+          swift build --product CodexBarCLI
+          bin_path="$(swift build --show-bin-path)"
+          [[ "$(lipo -archs "$bin_path/CodexBarCLI")" == arm64 ]]
+          test -d "$bin_path/CodexBar_CodexBarCore.bundle"
+          test -f "$bin_path/CodexBar_CodexBarCore.bundle/Contents/Resources/notion.js"
+          mkdir -p "$RUNNER_TEMP/artifact" "$RUNNER_TEMP/verify"
+          tar -czf "$RUNNER_TEMP/artifact/notion-cli-macos-arm64.tar.gz" -C "$bin_path" CodexBarCLI CodexBar_CodexBarCore.bundle
+          (cd "$RUNNER_TEMP/artifact" && shasum -a 256 notion-cli-macos-arm64.tar.gz > SHA256SUMS && shasum -a 256 -c SHA256SUMS)
+          tar -xzf "$RUNNER_TEMP/artifact/notion-cli-macos-arm64.tar.gz" -C "$RUNNER_TEMP/verify"
+          CODEXBAR_DISABLE_KEYCHAIN_ACCESS=1 "$RUNNER_TEMP/verify/CodexBarCLI" --help >/dev/null
+          {
+            printf '### Upstream Notion CLI verification\n\n'
+            printf 'Source commit: `%s`\n\n' "$SOURCE_SHA"
+            printf 'Architecture: `arm64`\n\n'
+            printf '```\n'
+            xcodebuild -version
+            swift --version
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notion-cli-macos-arm64-${{ steps.pr.outputs.sha }}
+          path: ${{ runner.temp }}/artifact/*
+          retention-days: 7
+          if-no-files-found: error
