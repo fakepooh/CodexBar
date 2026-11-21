@@ -7,6 +7,53 @@ import Testing
 struct MenuBarLayoutProviderBalanceTests {
     private let now = Date(timeIntervalSince1970: 1_752_768_000)
 
+    @Test
+    func `zai balance uses shared renderer without replacing subscription quotas`() throws {
+        let balance = try ProviderDetailSection(title: "Quota details", rows: [
+            .init(label: "Account balance", value: "¥8.66"),
+        ])
+        let snapshot = UsageSnapshot(primary: nil, secondary: nil, details: [balance], updatedAt: self.now)
+        #expect(self.data(provider: .zai, snapshot: snapshot).balance == "¥8.66")
+        #expect(self.data(provider: .zai, snapshot: snapshot).automaticText == "¥8.66")
+        let quota = UsageSnapshot(
+            primary: .init(usedPercent: 42, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            details: [balance],
+            updatedAt: self.now)
+        #expect(self.data(provider: .zai, snapshot: quota).balance == "¥8.66")
+        #expect(self.data(provider: .zai, snapshot: quota).automaticText == nil)
+    }
+
+    @Test
+    func `JetBrains top-up balance renders beside the unchanged monthly percentage`() throws {
+        let snapshot = try JetBrainsTopUpIntegrationTests.xml().toUsageSnapshot()
+        let data = self.data(provider: .jetbrains, snapshot: snapshot)
+        let output = self.render(
+            layout: MenuBarLayout(lines: [[.balance, .separatorDot, .percent(window: .automatic)]]), data: data)
+        if let path = ProcessInfo.processInfo.environment["CODEXBAR_JETBRAINS_BALANCE_PROOF"] {
+            let image = NSImage(size: NSSize(width: 420, height: 90))
+            image.lockFocus()
+            NSColor.white.setFill()
+            NSRect(x: 0, y: 0, width: 420, height: 90).fill()
+            ("JetBrains · Balance + monthly % used · synthetic" as NSString).draw(
+                at: NSPoint(x: 16, y: 60),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.black])
+            let title = NSMutableAttributedString(attributedString: output.attributedTitle)
+            title.addAttribute(
+                .foregroundColor,
+                value: NSColor.black,
+                range: NSRange(location: 0, length: title.length))
+            title.draw(at: NSPoint(x: 16, y: 24))
+            image.unlockFocus()
+            let tiff = try #require(image.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: tiff))
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
+        }
+        #expect(data.balance == "54.90 credits")
+        #expect(data.automaticText == nil)
+        #expect(output.attributedTitle.string == "54.90 credits\u{2009}·\u{2009}7%")
+    }
+
     @Test(arguments: ["7,850.5", "0", nil] as [String?])
     func `Notion balance token is independent of automatic allowance percentages`(balance: String?) throws {
         let sections = try balance.map { value in
@@ -58,53 +105,6 @@ struct MenuBarLayoutProviderBalanceTests {
         let balanceOnly = UsageSnapshot(primary: nil, secondary: nil, details: sections, updatedAt: self.now)
         #expect(MenuBarLayoutBalanceResolver.legacyBalance(provider: .notion, snapshot: balanceOnly) == nil)
         #expect(MenuBarLayoutBalanceResolver.balance(provider: .notion, snapshot: balanceOnly) == balance)
-    }
-
-    @Test
-    func `zai balance uses shared renderer without replacing subscription quotas`() throws {
-        let balance = try ProviderDetailSection(title: "Quota details", rows: [
-            .init(label: "Account balance", value: "¥8.66"),
-        ])
-        let snapshot = UsageSnapshot(primary: nil, secondary: nil, details: [balance], updatedAt: self.now)
-        #expect(self.data(provider: .zai, snapshot: snapshot).balance == "¥8.66")
-        #expect(self.data(provider: .zai, snapshot: snapshot).automaticText == "¥8.66")
-        let quota = UsageSnapshot(
-            primary: .init(usedPercent: 42, windowMinutes: 300, resetsAt: nil, resetDescription: nil),
-            secondary: nil,
-            details: [balance],
-            updatedAt: self.now)
-        #expect(self.data(provider: .zai, snapshot: quota).balance == "¥8.66")
-        #expect(self.data(provider: .zai, snapshot: quota).automaticText == nil)
-    }
-
-    @Test
-    func `JetBrains top-up balance renders beside the unchanged monthly percentage`() throws {
-        let snapshot = try JetBrainsTopUpIntegrationTests.xml().toUsageSnapshot()
-        let data = self.data(provider: .jetbrains, snapshot: snapshot)
-        let output = self.render(
-            layout: MenuBarLayout(lines: [[.balance, .separatorDot, .percent(window: .automatic)]]), data: data)
-        if let path = ProcessInfo.processInfo.environment["CODEXBAR_JETBRAINS_BALANCE_PROOF"] {
-            let image = NSImage(size: NSSize(width: 420, height: 90))
-            image.lockFocus()
-            NSColor.white.setFill()
-            NSRect(x: 0, y: 0, width: 420, height: 90).fill()
-            ("JetBrains · Balance + monthly % used · synthetic" as NSString).draw(
-                at: NSPoint(x: 16, y: 60),
-                withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.black])
-            let title = NSMutableAttributedString(attributedString: output.attributedTitle)
-            title.addAttribute(
-                .foregroundColor,
-                value: NSColor.black,
-                range: NSRange(location: 0, length: title.length))
-            title.draw(at: NSPoint(x: 16, y: 24))
-            image.unlockFocus()
-            let tiff = try #require(image.tiffRepresentation)
-            let bitmap = try #require(NSBitmapImageRep(data: tiff))
-            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
-        }
-        #expect(data.balance == "54.90 credits")
-        #expect(data.automaticText == nil)
-        #expect(output.attributedTitle.string == "54.90 credits\u{2009}·\u{2009}7%")
     }
 
     @Test(arguments: BundledPluginTestSupport.engines)
@@ -368,6 +368,57 @@ struct MenuBarLayoutProviderBalanceTests {
     }
 
     @Test
+    func `Grok prepaid balance reaches explicit layout without replacing weekly quota`() throws {
+        let snapshot = UsageSnapshot(
+            primary: .init(usedPercent: 100, windowMinutes: 10080, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            providerCost: ProviderCostSnapshot(
+                used: 0, limit: 0, currencyCode: "USD", balance: 17.61, updatedAt: self.now),
+            updatedAt: self.now)
+        let data = self.data(provider: .grok, snapshot: snapshot)
+        #expect(data.balance == "$17.61")
+        #expect(data.automaticText == nil)
+        #expect(self.render(
+            layout: MenuBarLayout(lines: [[.balance, .separatorDot, .percent(window: .automatic)]]),
+            data: data).attributedTitle.string == "$17.61\u{2009}·\u{2009}100%")
+        #expect(MenuBarLayoutBalanceResolver.balanceAmountsUSD(provider: .grok, snapshot: snapshot).remaining == 17.61)
+        #expect(MenuBarLayoutBalanceResolver.balance(
+            provider: .grok, snapshot: snapshot, showsOptionalCredits: false) == nil)
+        #expect(MenuBarLayoutBalanceResolver.balanceAmountsUSD(
+            provider: .grok, snapshot: snapshot, showsOptionalCredits: false).remaining == nil)
+        let zero = UsageSnapshot(
+            primary: snapshot.primary,
+            secondary: nil,
+            providerCost: ProviderCostSnapshot(
+                used: 0, limit: 0, currencyCode: "USD", balance: 0, updatedAt: self.now),
+            updatedAt: self.now)
+        #expect(self.data(provider: .grok, snapshot: zero).balance == "$0.00")
+        if let path = ProcessInfo.processInfo.environment["CODEXBAR_GROK_BALANCE_PROOF"] {
+            let missing = UsageSnapshot(primary: snapshot.primary, secondary: nil, updatedAt: self.now)
+            let layout = MenuBarLayout(lines: [[.balance, .separatorDot, .percent(window: .automatic)]])
+            let before = self.render(layout: layout, data: self.data(provider: .grok, snapshot: missing))
+            let after = self.render(layout: layout, data: data)
+            let image = NSImage(size: NSSize(width: 500, height: 120))
+            image.lockFocus()
+            NSColor.white.setFill()
+            NSRect(x: 0, y: 0, width: 500, height: 120).fill()
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.black,
+            ]
+            ("Grok · Balance + weekly quota · synthetic" as NSString)
+                .draw(at: NSPoint(x: 16, y: 90), withAttributes: attributes)
+            ("Before: \(before.attributedTitle.string)" as NSString)
+                .draw(at: NSPoint(x: 16, y: 55), withAttributes: attributes)
+            ("After: \(after.attributedTitle.string)" as NSString)
+                .draw(at: NSPoint(x: 16, y: 20), withAttributes: attributes)
+            image.unlockFocus()
+            let tiff = try #require(image.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: tiff))
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    @Test
     func `prepaid balance merged into a lowercase spend currency still feeds conditionals`() {
         // The spend-limit response keeps its own currency casing when the prepaid balance merges into it.
         let snapshot = UsageSnapshot(
@@ -399,7 +450,7 @@ struct MenuBarLayoutProviderBalanceTests {
     }
 
     @Test(arguments: [
-        (UsageProvider.grok, "–"), (.opencode, "–"), (.huggingface, "–"), (.replicate, "–"),
+        (UsageProvider.opencode, "–"), (.huggingface, "–"), (.replicate, "–"),
         (.typesafe, "$4.98"), (.xapi, "$4.98"), (.openrouter, "$12.34"),
     ])
     func `existing provider balance output ignores unrelated prepaid cost`(provider: UsageProvider, expected: String)
@@ -429,7 +480,7 @@ struct MenuBarLayoutProviderBalanceTests {
         #expect(amounts.used == (provider == .openrouter ? 7.66 : nil))
     }
 
-    @Test(arguments: [UsageProvider.grok, .opencode, .codex])
+    @Test(arguments: [UsageProvider.opencode, .codex])
     func `undeclared providers keep their prepaid cost balance out of the balance token`(provider: UsageProvider) {
         let snapshot = UsageSnapshot(
             primary: nil,

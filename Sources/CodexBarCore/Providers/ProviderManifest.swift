@@ -118,5 +118,7 @@ public enum ProviderManifest {
         OpenDesignProviderDescriptor.descriptor,
         SiliconFlowProviderDescriptor.descriptor,
         TripoProviderDescriptor.descriptor,
+        GoogleDeveloperProviderDescriptor.descriptor,
+        TrustedRouterProviderDescriptor.descriptor,
     ]
 }

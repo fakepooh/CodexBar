@@ -549,7 +549,7 @@ public struct CostUsageFetcher: Sendable {
             }
 
             #if os(macOS)
-            // Provider-specific by design: Cursor retries failed web cost queries against local CSV history.
+            // Provider-specific by design: Cursor retries failed web cost queries against local cache history.
             if provider == .cursor {
                 remoteSnapshot = try await self.loadCursorTokenSnapshot(
                     now: now,
@@ -560,7 +560,7 @@ public struct CostUsageFetcher: Sendable {
             }
             #endif
         } catch {
-            // Local CSVs have no account identity and cannot replace an explicitly selected credential.
+            // Local caches cannot establish the identity of an explicitly selected credential.
             if provider != .cursor || cursorCookieHeaderOverride != nil {
                 throw error
             }
@@ -741,8 +741,9 @@ public struct CostUsageFetcher: Sendable {
                 calendar: piOptionsOnly.calendar,
                 historyCoverageIsEstablished: piScanResult.isComplete,
                 costProvenance: .listPriceEstimate,
-                projects: [],
-                sessions: [],
+                projects: piScanResult.projects,
+                sessions: piScanResult.sessions,
+                detailsAreComplete: piScanResult.detailsAreComplete,
                 // An incomplete Pi scan may be serving a retained cache report. Keep its
                 // original scan time so stale usage is not presented as freshly read.
                 updatedAt: piScanResult.isComplete ? now : piScanResult.lastScanAt ?? now)
@@ -931,19 +932,35 @@ public struct CostUsageFetcher: Sendable {
         let sourceRefreshSucceeded = try await OpenCodeLocalHistoryAdapter.refresh(
             scope: sourceScope, cacheRoot: options.scanOptions.cacheRoot, calendar: options.scanOptions.calendar)
 
-        // Provider-specific by design: Codex owns project/session attribution and optional Pi merge state, while
-        // Claude/Vertex share the transcript scanner with mutually exclusive filters.
+        // Provider-specific by design: Codex and Claude own project/session attribution and optional Pi merge
+        // state, while Claude/Vertex share the transcript scanner with mutually exclusive filters.
         // These synchronous scans can run for minutes on large archives. The dedicated queue keeps
         // them off the cooperative pool and bridges task cancellation into scanner-level checks.
         return try await CostUsageScanExecutor.run { checkCancellation in
-            var daily = try CostUsageScanner.loadDailyReportCancellable(
-                provider: provider,
-                since: since,
-                until: now,
-                now: now,
-                options: options.scanOptions,
-                reportContext: options.reportContext,
-                checkCancellation: checkCancellation)
+            var projects: [CostUsageProjectBreakdown] = []
+            var sessions: [CostUsageSessionBreakdown] = []
+            var daily: CostUsageDailyReport
+            if provider == .claude {
+                let claude = try CostUsageScanner.loadClaudeReportProjectionsCancellable(
+                    since: since,
+                    until: now,
+                    now: now,
+                    options: options.scanOptions,
+                    reportContext: options.reportContext,
+                    checkCancellation: checkCancellation)
+                daily = claude.daily
+                projects = claude.projects
+                sessions = claude.sessions
+            } else {
+                daily = try CostUsageScanner.loadDailyReportCancellable(
+                    provider: provider,
+                    since: since,
+                    until: now,
+                    now: now,
+                    options: options.scanOptions,
+                    reportContext: options.reportContext,
+                    checkCancellation: checkCancellation)
+            }
             try checkCancellation()
 
             if provider == .vertexai,
@@ -964,8 +981,6 @@ public struct CostUsageFetcher: Sendable {
                 try checkCancellation()
             }
 
-            var projects: [CostUsageProjectBreakdown] = []
-            var sessions: [CostUsageSessionBreakdown] = []
             var piScanIsComplete = true
             var staleSnapshotUpdatedAt: Date?
             var detailsAreComplete = true
@@ -985,7 +1000,7 @@ public struct CostUsageFetcher: Sendable {
                    let previous = view.previousReport(range: range, rootsFingerprint: rootsFingerprint)
                 {
                     staleSnapshotUpdatedAt = previous.updatedAt
-                    daily = view.mergingSource(into: previous.report, range: range)
+                    daily = view.mergingSource(into: previous.report(in: range), range: range)
                 } else {
                     let reports = view.reports(range: range, cacheRoot: options.scanOptions.cacheRoot, roots: roots)
                     daily = reports.daily
@@ -1024,8 +1039,9 @@ public struct CostUsageFetcher: Sendable {
                         .compactMap(\.self)
                         .min()
                 }
-                // Provider-specific by design: only the Codex local ledger contributes Pi rows to this scan.
-                if provider == .codex {
+                // Provider-specific by design: only the Codex and Claude local ledgers attribute native rows to
+                // projects, so Pi rows join them as one unknown project and sessions stay native-only.
+                if provider == .codex || provider == .claude {
                     if let project = Self.unknownProjectBreakdown(from: piScanResult.report) {
                         projects.append(project)
                         sessions = []
@@ -1038,7 +1054,7 @@ public struct CostUsageFetcher: Sendable {
                     [daily, piScanResult.report],
                     calendar: options.scanOptions.calendar)
             }
-            if provider == .codex {
+            if provider == .codex || provider == .claude {
                 projects = Self.mergedProjectBreakdowns(projects)
             }
             return LocalTokenScanResult(
@@ -1478,7 +1494,7 @@ public struct CostUsageFetcher: Sendable {
                    range: range,
                    rootsFingerprint: rootsFingerprint)
             {
-                reports.append(cache.mergingSource(into: previous.report, range: range))
+                reports.append(cache.mergingSource(into: previous.report(in: range), range: range))
                 staleSnapshotUpdatedAt = previous.updatedAt
                 if let updatedAt = previous.updatedAt {
                     scanTimes.append(updatedAt)
@@ -1733,6 +1749,27 @@ public struct CostUsageFetcher: Sendable {
         historyDays: Int,
         calendar: Calendar = .current) async -> CostUsageTokenSnapshot?
     {
+        #if os(macOS)
+        let since = CostReportingPeriod.rolling(days: historyDays).bounds(now: now, calendar: calendar).lowerBound
+        switch CursorLocalJSONReader.load(since: since, until: now, calendar: calendar) {
+        case .absent:
+            break
+        case .unavailable:
+            return nil
+        case let .report(report):
+            guard !report.daily.data.isEmpty || report.meteredCostUSD != nil else { return nil }
+            return Self.tokenSnapshot(
+                from: report.daily,
+                now: now,
+                historyDays: historyDays,
+                calendar: calendar,
+                historyCoverageIsEstablished: report.isComplete,
+                historyScanIsPartial: !report.isComplete,
+                meteredCostUSD: report.meteredCostUSD,
+                costProvenance: Self.cursorCostProvenance(
+                    meteredCostUSD: report.meteredCostUSD, daily: report.daily.data))
+        }
+        #endif
         let allRows = CursorLocalCSVReader.cachedCSVPaths().flatMap { CursorLocalCSVReader.parseFile(at: $0) }
         guard !allRows.isEmpty else { return nil }
         let full = CursorLocalCSVReader.makeDailyReport(from: allRows, calendar: calendar)

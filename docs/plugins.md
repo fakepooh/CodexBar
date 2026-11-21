@@ -100,14 +100,23 @@ WorkBuddy uses this shared cookie host for its billing-only plugin. Its descript
 version because the website binds sessions to the browser User-Agent; cookie values stay opaque to the script.
 See [WorkBuddy](workbuddy.md) for the request contract, bounded optional reset lookup, and account coverage.
 
+[Xiaomi MiMo](mimo.md) reads Token Plan quota with a dedicated API key on the selected China or Singapore origin.
+The API plugin needs no browser access; the existing console and local sources remain available separately.
+
 [Tripo](tripo.md) reads available and reserved API credits with one fixed-origin bearer request. It keeps credits
 as credits, without inferred quota windows or dollar conversions.
+
+[TrustedRouter](trustedrouter.md) reads the current API key's microdollar limit and spend with one fixed-origin
+bearer request. Remaining is the API's reservation-aware amount, without inferred reset dates.
 
 [abliteration.ai](abliteration.md) uses a fixed-origin bearer request to read prepaid USD credits. It reuses the
 standard API-key field and classified errors, with no browser access or inferred reset schedule.
 
-[SiliconFlow](siliconflow.md) reads `GET /v1/user/info` with the same API-key field. China (`api.siliconflow.cn`)
-is the default and displays CNY; the international origin displays USD. The key is not sent to any other host.
+[SiliconFlow](siliconflow.md) reads the China balance only with explicit Web selection using `siliconflow-web.js`:
+one nonpersistent, request-URL browser session loads the billing page, takes the subject from its `x-subject-id`
+response header, and reads the wallet with the same
+session. Auto/API keep `GET /v1/user/info` with the configured key, with no browser fallback; international balances
+display USD. Neither script sends the API key to the console host or cookies to the API host.
 
 [X API](xapi.md) uses the same cookie host with a bundled `ct0` header echo for account discovery and developer-console
 credits. Its script preserves dollar balances and debt without receiving cookie values or adding a native fetcher.
@@ -118,6 +127,10 @@ nonpersistent cookie sessions use the shared access gate; the existing Gemini CL
 [Claude Platform](claudeplatform.md) sends the opaque `sessionKey` cookie through the same cookie host, so its script
 never sees cookie values. It lists organizations, then reads required `prepaid/credits` (a 403 tries the next API
 organization) and optional `current_spend`, whose failures keep the balance. Both plugin engines run it.
+
+[Google Developer Program](googledeveloper.md) uses the same opaque request-scoped Google cookies as the Gemini app
+source. Per signed-in account it reads the benefits page token, then sends one `batchexecute` form POST with
+`ctx.http.post`. It shows only the current monthly Gen AI & Cloud credit grant. Both plugin engines run it.
 
 [OpenDesign](opendesign.md) uses opaque, request-scoped cookies for two read-only GETs: current workspace and
 subscription windows. Its script validates workspace ownership and selects five-hour/weekly quotas by duration.
@@ -277,7 +290,8 @@ so portable third-party plugins must use the host helpers below instead of ECMA-
   authentication, deadline, response-size, and retry rules as JSON POST. Form values, their percent-encoded values,
   and their JSON-escaped values join the fetch's log/error redaction set before transport starts. Do not log
   credentials before submitting the request; values discovered by the script are not known to the host yet.
-- `opts.headers` accepts string values. Plugins cannot replace their declared auth header. `opts.timeoutSeconds` sets a
+- `opts.headers` accepts string values. An explicit `Content-Type` is preserved without changing JSON or form body
+  encoding. Plugins cannot replace their declared auth header. `opts.timeoutSeconds` sets a
   hard request deadline from 1 through 90 seconds; the default is 15 seconds. Each attempt’s deadline starts when
   its transport task begins, so scheduler delays do not consume the request budget. Queued work remains bounded
   by the overall fetch deadline and cancellation. An override does not extend that overall deadline; bundled
@@ -445,6 +459,8 @@ and a three-letter uppercase currency. Dates are JavaScript `Date` values or ISO
 always scoped to the manifest's instance ID. Data confidence defaults to `unknown`. Details allow at most 8 sections, 24 rows per section, 120 chart points,
 and 120 characters per detail string. Wrong types and limit violations fail the whole fetch instead of truncating it.
 
+Detail bar charts show the hovered point’s label, formatted value, and unit. Units named `token` or `tokens` use the shared compact token formatter.
+
 Standard windows (`primary`, `secondary`, and `tertiary`) may include an optional `title`. Generic menu cards and
 `plugins fetch` text output use it instead of Primary, Secondary, or Tertiary. Titles are trimmed, limited to 256 UTF-8
 bytes, and must be strings; omitted, null, or blank titles use the default label. JSON snapshots retain the title.
@@ -518,6 +534,17 @@ organization, plan/login-method, and account-ID fields in the menu and CLI. A ve
 may return `{empty: true}` with optional identity. This creates no artificial rate window; every supplied field is still
 validated. An empty object, an empty `identity` object, or metadata such as confidence and subscription dates without
 displayable usage or identity remains invalid unless `empty: true` is explicitly declared.
+
+## Statistics and sharing
+
+Enabled, approved community plugins that already return `costUsage` also contribute to Usage & Spend,
+token activity, and shared statistics. The existing unversioned contract and daily-window rules apply.
+Each plugin is counted once under its own instance ID, independently of its `iconProvider` branding.
+Plugins without `costUsage` contribute nothing. Sharing uses public manifest metadata, never plugin
+account identity, settings, secrets, or paths. Failed refreshes and changed configuration invalidate
+statistics until a successful refresh; the quota card keeps its existing last-known behavior.
+Statistics consume publications from the normal plugin refresh cadence and manual provider refreshes.
+Opening or refreshing Usage & Spend never fetches community plugins; successful quota-only results remain empty.
 
 ## External hooks
 
@@ -637,6 +664,9 @@ The tab uses the manifest name and icon. Selecting it shows that plugin’s usag
 explicit `topLevel: false`, which keeps the appended-card placement under provider tabs and Overview. With Merge Icons
 disabled, all plugins retain appended-card placement regardless of `topLevel`.
 
+Plugin card headers use the same title style and insets as built-in providers. Branding stays in the switcher,
+and the plugin source file remains visible in plugin settings.
+
 A single plugin works without a redundant switcher, and multiple plugin tabs work even with no built-in providers
 enabled. Refresh and Cmd-R refresh the selected plugin; each card’s refresh button targets that card. Completed
 refreshes update visible plugin cards, and repeated requests for the same plugin share its in-flight refresh.
@@ -737,7 +767,7 @@ Bundled scripts own requests, error classification, and snapshot mapping; Swift 
 | [Aixy](aixy.md) | TypeScript maps key-scoped usage and budgets; the host validates the configured gateway origin and supplies the API key. |
 | [Qwen Cloud](qwen-cloud.md) | `qwencloud-team.ts` discovers the billing selector and fetches Team credits through form POSTs. Native Qwen cookie selection supplies one opaque dashboard session; Individual remains native as the fallback. |
 | [Raycast](raycast.md) | `ctx.browser.sessions` retries candidates for declared `raycast.com` / `www.raycast.com` domains. The broker prefers exact-host cookies over same-name parent cookies and excludes sibling/lookalike hosts. |
-| [Muse (muse.ai)](museai.md) | `ctx.browser.sessions` for `muse.ai`, with `persistent-storage` holding the deploy-specific server-action ID. A stale ID (`404 Server action not found.`) triggers rediscovery from the signed-in page's chunks. |
+| [Muse (muse.ai)](museai.md) | `ctx.browser.sessions` for `muse.ai`, with `persistent-storage` holding the deploy-specific server-action ID. HTTP 400/404 triggers one rediscovery from the signed-in page's chunks; transient failures retain the cached ID. |
 
 ## Native adapters with declarative registration
 

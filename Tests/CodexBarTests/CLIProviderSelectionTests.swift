@@ -50,6 +50,8 @@ struct CLIProviderSelectionTests {
             "|chatbox|",
             "|abliteration|",
             "|tripo|",
+            "|googledeveloper|",
+            "|trustedrouter|",
             "|both|",
             "|all]",
         ]

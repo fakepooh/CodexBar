@@ -28,12 +28,12 @@ struct NotionPersonalAllowanceTests {
         value["status"] = "within_limit"
     }
 
-    @Test(arguments: BundledPluginTestSupport.engines)
+    @Test(arguments: BundledPluginTestSupport.engines, ["0", "300"])
     func `live migrated fixture keeps three independent pools and exact monthly boundaries`(
-        engine: ProviderPluginEngineKind) async throws
+        engine: ProviderPluginEngineKind, premium: String) async throws
     {
         let trace = Trace()
-        let snapshot = try await Self.fetch(engine, usage: Self.payload(), trace: trace)
+        let snapshot = try await Self.fetch(engine, usage: Self.payload(), premium: premium, trace: trace)
         let standard = try #require(snapshot.primary)
         let select = try #require(snapshot.secondary)
         #expect(standard.title == "Standard")
@@ -49,7 +49,7 @@ struct NotionPersonalAllowanceTests {
         #expect(select.resetsAt == Self.end)
         #expect(snapshot.detailRow(label: "Standard remaining")?.usageValue == 134.66869)
         #expect(snapshot.detailRow(label: "Select remaining")?.usageValue == 0)
-        #expect(snapshot.detailRow(label: "Remaining credits")?.value == "0")
+        #expect(snapshot.detailRow(label: "Remaining credits")?.value == premium)
         #expect(snapshot.details.map(\.title) == ["Personal credits", "Notion Credits"])
         #expect(trace.endpoints == ["getSpaces", "getCreditRateLimitStatus", "getAIUsageEligibilityV2"])
     }
@@ -69,6 +69,38 @@ struct NotionPersonalAllowanceTests {
             #expect(snapshot.secondary?.title == (bucket == "flex" ? "Select" : nil))
             #expect(snapshot.primary?.windowMinutes != 360)
             #expect(snapshot.details.first?.rows.count == 1)
+        }
+    }
+
+    @Test(arguments: BundledPluginTestSupport.engines)
+    func `an invalid sibling never hides a resolved personal pool or workspace balance`(
+        engine: ProviderPluginEngineKind) async throws
+    {
+        for invalidBucket in ["auto", "flex"] {
+            for failure in ["malformed", "unresolved", "zero-limit", "duplicate"] {
+                let usage = try Self.payload { value in
+                    var entries = try #require(value["allowances"] as? [[String: Any]])
+                    let index = try #require(entries.firstIndex { $0["bucketId"] as? String == invalidBucket })
+                    switch failure {
+                    case "malformed": entries[index]["used"] = "unknown"
+                    case "unresolved": entries[index]["state"] = "not_exposed"
+                    case "zero-limit": entries[index]["limit"] = 0
+                    default: entries.append(entries[index])
+                    }
+                    value["allowances"] = entries
+                    try Self.legacy(&value)
+                }
+                let snapshot = try await Self.fetch(engine, usage: usage, premium: "300")
+                let valid = try #require(invalidBucket == "auto" ? snapshot.secondary : snapshot.primary)
+                #expect(valid.title == (invalidBucket == "auto" ? "Select" : "Standard"))
+                #expect(valid.quotaLimit == (invalidBucket == "auto" ? 500 : 1500))
+                #expect(valid.resetsAt == Self.end)
+                #expect((invalidBucket == "auto" ? snapshot.primary : snapshot.secondary) == nil)
+                #expect(snapshot.details.first?.rows.count == 1)
+                #expect(snapshot.detailRow(label: "Remaining credits")?.value == "300")
+                #expect(snapshot.detailRow(label: "\(valid.title ?? "") remaining")?.usageValue
+                    == (invalidBucket == "auto" ? 0 : 134.66869))
+            }
         }
     }
 
@@ -159,7 +191,9 @@ struct NotionPersonalAllowanceTests {
                     _ = try await Self.fetch(engine, usage: usage)
                     Issue.record("Unresolved pools cannot create measured zero windows")
                 } catch {
-                    #expect(error.localizedDescription.contains("not resolved"))
+                    #expect(error.localizedDescription.contains("did not provide usable personal AI allowances"))
+                    #expect(error.localizedDescription.contains("Check AI usage for the selected workspace in Notion"))
+                    #expect(error.localizedDescription.contains("refresh CodexBar again"))
                 }
             }
         }

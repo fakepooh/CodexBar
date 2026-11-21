@@ -133,7 +133,7 @@ struct NotionStrategyDeadlineTests {
         options.waitForFetchDeadline = { await clock.sleep(seconds: $0) }
         let strategy = NotionProviderDescriptor.webStrategy(
             timeout: timeout, transport: ProviderHTTPTransportHandler(handler))
-        _ = try strategy.loadedRuntime(contextOptions: options, engine: engine)
+        try strategy.prepareRuntime(contextOptions: options, engine: engine)
         return strategy
     }
 

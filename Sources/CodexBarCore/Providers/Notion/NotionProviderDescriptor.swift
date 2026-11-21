@@ -107,7 +107,8 @@ public enum NotionProviderDescriptor {
                 },
                 semanticWindowResolver: { snapshot in
                     if Self.isPersonalAllowance(snapshot.primary) || Self.isPersonalAllowance(snapshot.secondary) {
-                        return ProviderSemanticWindows(session: nil, weekly: snapshot.primary ?? snapshot.secondary)
+                        // The card supplies its semantic weekly pace to the secondary (Select) metric.
+                        return ProviderSemanticWindows(session: nil, weekly: snapshot.secondary ?? snapshot.primary)
                     }
                     let rolling = snapshot.primary.flatMap { window -> RateWindow? in
                         guard !window.isSyntheticPlaceholder,
@@ -189,6 +190,9 @@ extension NotionProviderDescriptor {
                     settings: [
                         "WORKSPACE_ID": settings?.workspaceID ?? "",
                         "OPTIONAL_USAGE": String(context.includeOptionalUsage),
+                        "UNAVAILABLE_MESSAGE": UsageFormatter.localized(
+                            "Notion did not provide usable personal AI allowances for this workspace. " +
+                                "Check AI usage for the selected workspace in Notion, then refresh CodexBar again."),
                     ],
                     secrets: ["HEADERS": String(data: encoded, encoding: .utf8) ?? "{}"])
             }, isEnabled: { _ in true })

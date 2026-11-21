@@ -345,6 +345,8 @@ provider-toggle actions under test on the production setter; the fixture helper 
 
 ### Cost scanner CPU regressions
 
+Native cache loads decode each file's saved details once, at cache conversion, rather than decoding its request ledger again just to admit usage rows. The read-work counter guards this per-file decode count. Malformed details still exclude the file from the restored cache, and persisted row counts remain intact. Storage-only changes do not alter the parser hash or invalidate existing accounting.
+
 Cost marker searches compare exact UTF-8 bytes with bounded libc `memchr` and `memcmp` calls.
 Both buffers remain borrowed during the search, and candidate starts stop at the last position
 where the complete needle fits. Empty needles retain Foundation's `Data.range(of:)` behavior.
@@ -450,6 +452,12 @@ Removing the unused field in the shared scanner changes the generated native par
 semantics remain unchanged. Published `494eee446bb2e5f9` is a tested compatible predecessor; existing
 predecessors and store receipt logic remain intact. Pi/OMP pricing keys include this hash and therefore
 reparse once under the existing invalidation contract, also tested with and without a catalog.
+
+Claude project and session attribution lives only in `*Claude*` scanner files: the parser records each
+session's first `cwd` per transcript in `CostUsageClaudeCache.sourceProjectPaths`, and
+`CostUsageScanner+ClaudeProjects.swift` projects the reconciled rows by session and project. Those files are
+excluded from the Codex parser hash, so `Scripts/regenerate-codex-parser-hash.sh --check` stays green and Pi/OMP
+caches do not reparse. The Claude cache schema bump to 6 rebuilds Claude/Vertex caches once.
 
 A second optimized synthetic check against main `354191af9` used three fresh-cache scans per provider
 with 32–128 KiB text bodies. Median CPU decreased by 3–18% across Claude/Vertex cases (the 3% case is
