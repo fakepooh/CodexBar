@@ -1,10 +1,33 @@
 # Changelog
 
-## 0.84.1 — Unreleased
+## 0.85.1 — Unreleased
+
+## 0.85.0 — 2026-11-21
+
+### Highlights
+
+- Providers: new TrustedRouter key limits and spend, MiMo Token Plan quotas, Notion AI personal allowances, Google Developer Program credits, and DeepSeek Platform spend. Grok prepaid credits reach the menu bar, OpenAI API snapshots carry the legacy credit balance, Helmcode shows billing-period credit usage, and Amp enterprise workspaces load with their recorded cost.
+- Cost: Claude and Pi cost by session and project, Codex Ultrafast and Fast pricing, filled-in Claude model prices, and a Models view in Usage & Spend.
+- Less repeated work: Usage & Spend stops reloading on every refresh tick (about 85% less background CPU at a 1-minute interval in a local profile), Codex cost-cache saves no longer rewrite ~100 MB, cancelled refreshes stop early, and Claude OAuth and Muse Code avoid repeated background Keychain prompts.
+- Claude accounts, CLI and server: claude-swap Overview, Plan Usage, tabs and shared cost follow the presented account, `codexbar serve` honors `allAccounts`, `dashboard --no-cost` skips cost work, and unknown `--provider` values are rejected.
 
 ### Added
 
-- Notion AI: show personal Standard and Select monthly credits alongside the separate workspace balance, with exact reset dates and legacy Rolling/Monthly fallback (#9).
+- MiMo: add a Token Plan API-key source for China and Singapore, showing reported quota and reset dates without browser access (#5124, #5138). Thanks @whisky0809!
+- Grok: show prepaid Extra Usage Credits in the menu bar Balance element, including a zero balance, while respecting the optional-credits preference (#5127, #5138). Thanks @therealdeadfwd!
+- OpenAI API: include the remaining legacy API credit balance in provider cost snapshots, including CLI JSON, for downstream balance displays (#5109). Thanks @fcakyon!
+- CLI: add `codexbar dashboard --no-cost` for quota-only snapshots that skip cost refreshes (#5121, #5137). Thanks @get6!
+- Linux: add a pinned compact state to Quick View (#5130). Thanks @WizLiang!
+- Plugins: show point labels, values, and units when hovering detail-chart bars (#5092). Thanks @tangwz!
+- Browser cookies: support Chrome Dev in the shared browser import order while preserving explicit Chrome selections (#5136).
+- Notion AI: show personal Standard and Select monthly allowances alongside the separate workspace Notion Credits balance, preserving legacy windows, exact billing periods, and optional-usage visibility (#2888, #4919, #5102). Thanks @fakepooh and @KennyNoDie!
+- TrustedRouter: show the API key's remaining limit and daily, weekly, monthly, and total spend through the official key endpoint, including reservation-aware remaining amounts and explicit zero-dollar limits (#5119). Thanks @jperla!
+- Usage & Spend: include community plugins' existing cost usage in statistics and sharing without extra dashboard fetches or mixed provider identities (#5084). Thanks @tangwz!
+- Google Developer Program: show the current monthly Gen AI & Cloud credit of Google AI Pro and Ultra from the benefits page, using the signed-in browser session and finding the Google account that holds the credit (#5033, #5035). Thanks @fcakyon!
+- Pi: group local cost by session and project in the cost-history menu, Usage & Spend, and `codexbar cost --group-by session|project`, with JSON project totals and a one-time history rebuild (#4930, #5025). Thanks @oryband!
+- Claude: group local cost by session and project in the cost-history menu, Usage & Spend, and `codexbar cost --group-by session|project`, counting copied responses once and rebuilding history once after upgrading (#4930, #5026). Thanks @oryband!
+- DeepSeek: show Platform spend in menu-bar cost elements and Usage & Spend, preserving the reporting period, currency, and unavailable measurements (#5057). Thanks @zhb161!
+- CLI: declare DeepInfra setup guidance with API-key alternatives, piped input, and saved-account priority (#5077). Thanks @vincent-peng!
 - CLI: declare ElevenLabs setup guidance, including API-key alternatives, subscription-read permission, and saved-account priority (#5020). Thanks @vincent-peng!
 - Usage & Spend: add a Models view grouped by currency, preserve partial-history warnings, and match shared cards to the current appearance (#4889, #4888). Thanks @Chipagosfinest!
 - CLI: expose provider-owned setup routes for Copilot, OpenAI API, and Azure OpenAI, with explicit unknown guidance for other providers (#4705, #4916). Thanks @Yuxin-Qiao!
@@ -12,6 +35,43 @@
 
 ### Fixed
 
+- Codex: price native Ultrafast usage at the published, date-aware rates and keep its tier through cached history (#5133, #5139). Thanks @janishahn!
+- Codex: limit retained cost reports to the requested history period without discarding the wider cached history (#5125). Thanks @Yuxin-Qiao!
+- Muse (muse.ai): restore subscription discovery with immutable Next.js chunks, including stale-action recovery (#5093, #5095, #5120). Thanks @AnsonZhang0129, @ericgitlub, and @Kenlsc!
+- OpenAI API: honor the configured organization for legacy API credit balances without leaking the organization selection between token accounts (#5123, #5135). Thanks @Josephur!
+- Antigravity: discover the agy CLI bundled with Gemini.app after the existing CLI locations and shell lookups (#5113, #5135). Thanks @MaTouNB!
+- Claude: keep account tabs in numeric slot order when switching accounts (#5117). Thanks @sfxsalem!
+- Claude: make Plan Usage follow the presented claude-swap account instead of stale ambient history (#5110). Thanks @davisonio!
+- Claude Platform: keep balance reporting when credit grant details exceed the display limit (#5115). Thanks @Yuxin-Qiao!
+- Storage: keep Claude OAuth and Antigravity session locks in the user Application Support directory (#5122, #5137). Thanks @mrh-is!
+- HTTP server: honor `allAccounts` on `/usage`, isolate cached responses per request shape, and preserve explicit Claude token-account selection (#5098, #5099, #5137). Thanks @djbclark!
+- Cost history: align the model-list scrollbar with the menu edge (#5116). Thanks @soohanpark!
+- Cursor: restore Automatic local spend fallback for Tokscale JSON caches, preserving event snapshot deduplication and Manual credential boundaries (#5090). Thanks @vincent-peng!
+- Amp: load enterprise-paid workspaces, which report no balance, instead of failing with “Missing Amp usage data”, and show their 30-day recorded cost with daily cost, token, and model history from `amp usage --details` in the cost chart and Usage & Spend (#5128). Thanks @gmmeyer!
+- Claude: show the combined local cost history once below claude-swap account cards, as Codex does for its shared spend; Claude accounts mapped to their own config directory keep per-account cost (#5089). Thanks @michael0903!
+- Providers: stop cancelled refreshes before loading or attempting another browser-session candidate (#5085). Thanks @Lucenx9!
+- Plugins: align community-provider card headers with built-in cards and give refresh an explicit accessibility label (#5086). Thanks @tangwz!
+- Menu bar: preserve the full-size leading provider icon beside both text rows in high-contrast custom layouts (#5041). Thanks @deinspanjer and @nunoh!
+- Claude: draw weekly-only plans as a single menu bar meter instead of an empty session lane above the weekly bar (#4914, #5040). Thanks @wizaj!
+- Codex cost: stop rewriting every archived (`.jsonl.zst`) rollout in the cost cache on each save, which wrote about 100 MB per save on stores with a few thousand archived sessions (#5049). Thanks @oldcai!
+- Droid: correct missing API-key instructions for piped input and modern or custom config locations (#5065). Thanks @vincent-peng!
+- Venice: show the fetched USD or DIEM balance when the API reports calls are blocked instead of the generic unavailable message (#5048, #5050). Thanks @harjothkhara and @djbclark!
+- TypeSafe: send the browser same-origin headers the billing overview API expects so valid sessions stop surfacing as expired (#4922, #5022). Thanks @LeoLin990405 and @johan456789!
+- SiliconFlow: restore China balances through the signed-in console when Web is explicitly selected, keeping Auto and API on the configured API key (#5023). Thanks @NOIPJohnny!
+- Usage & Spend: hide model spend shares when the selected period contains unpriced requests, retaining known amounts and shares for fully priced selected days (#5024). Thanks @Chipagosfinest!
+- MiniMax: recover expired automatic browser sessions without background prompts, while Manual and Off remain isolated from automatic browser fallback (#5027). Thanks @tangwz!
+- Menu bar: keep zero-value secondary quota meters aligned with populated meters, preserving the compact layout when credits are shown (#5029). Thanks @nunoh!
+- Muse (muse.ai): recover usage after stale server-action responses, including HTTP 409, by rediscovering the action once while retaining it on transient failures (#5051, #5030). Thanks @tarunravi and @TM-AIStudios!
+- Helmcode: show NaN billing-period credit usage instead of frozen token quotas, with per-model credit details and purchased credits kept separate from spending (#5044). Thanks @eavilaes!
+- Claude: fill missing model prices in local cost reports, including cache writes, and reprice retained usage without rescanning unchanged transcripts (#5054). Thanks @urda!
+- Muse Code: prevent background and settings Keychain prompts when the CLI's signing-team restrictions exclude CodexBar, preserving the existing manual-refresh allowance (#5069, #5055). Thanks @enieuwy and @pjmuller!
+- Linux: make Quick View tab meters follow the same used-or-remaining preference as detailed quota bars (#5063). Thanks @marcelohildebrand!
+- Codex: apply Fast rates to additional models, including long-context requests, and recalculate saved cost estimates without discarding history (#5067). Thanks @jslabxyz!
+- Notifications: keep the app responsive when the system notification service stalls during notification removal (#5076). Thanks @djbclark!
+- Claude: make the Overview card follow the account presented by claude-swap, including inspected accounts, while retaining provider-wide local costs (#5078). Thanks @davisonio!
+- Linux: keep plan labels on one line and format token counts without duplicate separators on Qt 6.4 (#5052, #5080). Thanks @WizLiang!
+- Menu bar: keep provider-colored icons full size beside both rows of eligible custom layouts (#5031, #5081). Thanks @elpinguinofrio!
+- Claude: prevent repeated background OAuth Keychain prompts after credential updates and share one manual repair allowance with a denial cooldown (#3798, #5082). Thanks @ttoswar, @mskonovalov, @mvicari, and @JacobNWolf!
 - CLI: reject unknown `--provider` values for usage, cost, and cards with an argument error instead of silently falling back to enabled providers (#5017, #5019). Thanks @coygeek and @harjothkhara!
 - Ollama: support legacy API session and weekly balances while preserving monthly credits. (#5005, #5006) Thanks @Colafornia!
 - Mistral: recover from expired sessions that redirect to sign-in instead of returning HTTP 401/403. (#5000, #5002) Thanks @enieuwy!
@@ -19,9 +79,16 @@
 - Claude: show Enterprise extra-usage limits in the provider switcher while preserving provider identity boundaries. (#4989) Thanks @jey3dayo!
 - Alibaba: read Team CLI seat quotas, retain browser fallback for unavailable credits, and recognize mainland Qwen aliases. (#5008) Thanks @yinjialu!
 - Share Stats: replace faint provider markers with recognizable provider icons in light and dark cards. (#5011) Thanks @Chipagosfinest!
+- Claude: finish the CLI `/usage` read as soon as a weekly-only plan's quota is drawn, instead of waiting out the 20-second probe timeout (#5066, #5070). Thanks @mjaverto!
+- Usage & Spend: stop reloading the shared dashboard, and rescanning Codex history, on every refresh tick when Grok, OpenAI API, OpenRouter, Mistral, xAI, DeepSeek, or OpenCode Go is enabled, including when DeepSeek or xAI report no spend analytics; unchanged spend no longer counts as a new source revision, cutting background CPU by about 85% at a 1-minute refresh interval in a local profile (#5071, #5141).
+- OpenCode Go: Auto waits at most 5 seconds for a large local history before returning remote quota, without showing partial history; without remote quota it still returns the local estimate, and the scan keeps warming the cache for a later refresh (#5060, #5062). Thanks @harjothkhara and @faresahmedbaianat-hash!
 
 ### Changed
 
+- Codex cost: avoid decoding saved file details twice during local cost reads (#5108, #5137). Thanks @tkafka!
+- Dependencies: update SweetCookieKit 0.6.0, Commander 0.3.1, swift-crypto 5.1.2, swift-log 1.17.2, swift-asn1 1.7.4, and the release Sparkle signing tools 2.10.1 (#5136).
+- Docs: restore the README introduction to the complete provider list and point provider-status instructions to General → Refreshing (#5114, #5105). Thanks @davisonio and @nunoh!
+- Performance: reduce refresh work by preparing only the requested provider's settings instead of every provider's settings (#5083).
 - Claude: reduce local-history memory by sharing identical quota-event buffers while preserving independent reporting windows and cache validation (#5014).
 - Widgets: show provider logos and improve low-quota bar contrast without changing layouts or refresh behavior (#4887). Thanks @Chipagosfinest!
 

@@ -159,22 +159,20 @@ public final class ScriptFetchStrategy: ProviderFetchStrategy, @unchecked Sendab
         false
     }
 
-    /// Test preparation retains the real strategy and worker with a controlled clock and engine.
-    /// Production fetches acquire an exclusive worker through acquireRuntime().
-    func loadedRuntime(
+    /// Prepare the idle cached runtime with a controlled clock/engine for strategy deadline tests.
+    func prepareRuntime(
         contextOptions: ProviderPluginContextOptions,
-        engine: ProviderPluginEngineKind) throws -> ProviderPluginRuntime
+        engine: ProviderPluginEngineKind) throws
     {
-        try self.lock.withLock {
-            let runtime = try ProviderPluginRuntime(
-                bundledPlugin: self.bundledPlugin,
-                transport: self.transport,
-                timeout: self.timeout,
-                contextOptions: contextOptions,
-                engine: engine)
-            self.runtime = runtime
-            return runtime
-        }
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        precondition(!self.runtimeInUse)
+        self.runtime = try ProviderPluginRuntime(
+            bundledPlugin: self.bundledPlugin,
+            transport: self.transport,
+            timeout: self.timeout,
+            contextOptions: contextOptions,
+            engine: engine)
     }
 
     private func acquireRuntime() throws -> ProviderPluginRuntime {

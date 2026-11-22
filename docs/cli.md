@@ -73,8 +73,10 @@ does not read credentials, launch login flows, import cookies, or contact provid
 OpenAI API distinguishes Admin access from legacy balance access, and Azure OpenAI requires a key, endpoint,
 and deployment. ElevenLabs declares an API-key route with `user_read` permission, including both environment
 names and the selected saved-account alternative. Its stdin command saves a standalone key; a selected saved
-account takes priority. Other providers and user plugins report `status: "unknown"`, which means guidance has not
-been declared, not that credentials are unnecessary or unsupported. Existing `authentication` fields stay unchanged.
+account takes priority. DeepInfra also declares its existing API-key route with standalone config,
+selected saved accounts, and both environment names. Other providers and user plugins report `status: "unknown"`,
+which means guidance has not been declared, not that credentials are unnecessary or unsupported.
+Existing `authentication` fields stay unchanged.
 
 Routes are alternatives; all `requiredInputs` in one route are required together. Each input lists alternative
 config fields and environment variable names, never values or precedence. Config paths are relative to a provider
@@ -152,6 +154,7 @@ a second identifier is an error. For an option value beginning with a dash, use 
   - `--refresh` ignores cached scans.
   - `--breakdown` adds Claude-only daily and top-model details to text output. Both sections use the same last seven calendar days (or the shorter requested interval); when that interval has no rows, both explicitly label the latest recorded days. Incomplete attribution is marked partial. Ordinary text, other providers, and JSON output are unchanged.
   - `--group-by project` labels incomplete local history with the same notice as the default text report, including when no project rows are available.
+  - `--group-by project|session` applies to Codex, Claude, and [Pi](pi.md) local history. Other providers are skipped in text output with a notice; JSON keeps every requested provider. Codex and Claude session grouping shows native conversations only and warns when Pi/OMP usage is omitted; selecting Pi includes those sessions separately.
   - `--provider-native-only` is experimental and excludes pi and OMP session mirrors from Claude and Codex history.
   - `--provider codex --remote <ssh-host>` produces one manual report with separate local and remote summaries. Histories are never added together, since sessions can overlap across machines. SSH uses the host's existing trusted configuration and noninteractive authentication, without agent or port forwarding. It requires an already trusted host key and a remote CLI supporting `--summary-only`.
     Each successful text report shows `Snapshot updated:` using that source summary's `updatedAt` as an absolute ISO 8601 timestamp in UTC (`Z`). This is the source snapshot time, not the last usage event, command execution time, or SSH receipt time. Day boundaries retain each host's own timezone.
@@ -222,6 +225,7 @@ a second identifier is an error. For an option value beginning with a dash, use 
   - Force enhanced mode elsewhere with `CODEXBAR_CARDS_ENHANCED=1`.
   - Exit code is non-zero when any provider fetch fails.
 - `codexbar dashboard` prints one dashboard-v1 JSON snapshot and exits.
+  - `--no-cost` skips cost collection entirely for quota-only consumers. Usage windows and account collection keep their normal behavior; cost fields remain unavailable. Without this flag, cost collection and the overall `--timeout` deadline are unchanged.
   - Honors enabled providers in stable order, carries configured display sort keys, and defaults to full account identity; `--identity redacted` hides email local parts.
   - Provider failures remain row-level errors alongside healthy rows; a valid partial snapshot exits `0`.
   - Claude's unavailable per-model breakdown adds `providers[].warnings: ["model-breakdown-unavailable"]` while retaining session and all-model weekly quotas. This optional schema-v1 field carries fixed codes only, never provider notice text, in every identity mode. It is omitted after recovery and from shell rows; an account with no model-specific limit does not receive the warning.
@@ -245,6 +249,7 @@ a second identifier is an error. For an option value beginning with a dash, use 
   - On a **non-loopback** host the token gates **all data routes** — `/usage`, `/cost`, and `/dashboard/v1/snapshot` all require `Authorization: Bearer YOUR_TOKEN`, so account data is never exposed to the network unauthenticated. The static web UI at `/` and `/health` are always open. On the default loopback bind, `/usage` and `/cost` stay unauthenticated.
   - `--allow-plain-http` is the explicit acknowledgment that the bearer token crosses the network **in cleartext on every request** when serving on a non-loopback host. `serve` refuses to start on a non-loopback host without it.
   - Provider config is reloaded for each usage/cost request; cache entries are keyed by the loaded config so provider toggles and source changes do not require restarting `serve`.
+  - Add `allAccounts=true` to `/usage` to collect all configured token accounts, matching `usage --all-accounts`. `1` and `yes` are also accepted, case-insensitively. Single-account and all-account responses use separate caches; omitting the query keeps the existing account selection.
   - Forced refreshes also prune expired response variants, so repeated configuration changes do not retain obsolete snapshots indefinitely.
   - Transient refresh failures fall back to the last good response for up to ten refresh intervals (minimum five minutes) so polling clients do not flicker between data and errors; disabled when `--refresh-interval 0`.
   - After a cached usage or cost response expires, `serve` returns the last-good response immediately while rebuilding it in the background. Dashboard snapshots wait for a rebuild after their normal refresh interval, including when returning to a previously cached used/remaining mode; request deadlines and last-good fallback on failure still apply. `--refresh-interval 0` keeps every request blocking.
@@ -369,7 +374,7 @@ The saved app reporting period applies by default. `--period month-to-date|all` 
 - `historyCoverageIsEstablished`: `true` when the displayed Codex history covers the requested window, including an established same-scope snapshot retained while a newer bounded scan catches up; `false` when only incomplete history is available.
 - Cursor only: `meteredCostUSD` — what Cursor's plan actually deducts over the full requested window, alongside the API-rate estimate in `totals.totalCost`.
 - `daily[]`: `date`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheCreationTokens`, `totalTokens`, `totalCost`, `modelsUsed`, `modelBreakdowns[]` (`modelName`, `cost`)
-- Codex only: `projects[]`: `name`, `path`, `totalTokens`, `totalCost`, `daily[]`, `modelBreakdowns[]`, `sources[]`
+- Codex, Claude, and Pi: `projects[]`: `name`, `path`, `totalTokens`, `totalCost`, `daily[]`, `modelBreakdowns[]`, `sources[]` (always empty for Pi)
 - `totals`: `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheCreationTokens`, `totalTokens`, `totalCost`. These totals, `daily[]`, and `projects[]` retain the full requested window described by `historyDays`.
 - Claude/Vertex preliminary proxy records without final usage are excluded from totals. A positive optional `incompleteRequestCount` appears on the provider, `totals`, affected `daily[]`, and affected `modelBreakdowns[]`; complete-only payloads keep their previous shape. Known amounts remain partial subtotals, while incomplete-only amounts stay unavailable. Text output and the web dashboard mark these subtotals **Incomplete**. Usage & Spend exports include the same optional count on affected currency groups, providers, and model rows.
 - `error`: structured provider error when a fetch fails (for example Cursor requested while its cookie source is Off).
@@ -423,6 +428,8 @@ codexbar cost --period all --json
 codexbar cost --days 90           # choose a 1...365 day cost window
 codexbar cost --provider codex --group-by project
 codexbar cost --provider codex --group-by session
+codexbar cost --provider claude --group-by project
+codexbar cost --provider pi --group-by session
 codexbar cost --provider claude --format json --pretty
 codexbar guard --provider codex --min-remaining 20 --window weekly --json
 codexbar cost --provider cursor   # Cursor dashboard cost (API-rate + Cursor-metered)

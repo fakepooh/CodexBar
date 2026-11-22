@@ -75,14 +75,14 @@ final class ClaudeOAuthPendingCacheClearUserDefaultsStore: ClaudeOAuthPendingCac
 
     private let domain: String
     private let key: String
-    private let lockURL: URL
+    let lockURL: URL
     private let userDefaults: UserDefaults
 
     init(
         domain: String,
         key: String,
-        lockURL: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent(DeveloperStorage.dotDirectoryName, isDirectory: true)
+        lockURL: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent(DeveloperStorage.directoryName, isDirectory: true)
             .appendingPathComponent("claude-oauth-cache.lock"))
     {
         self.domain = domain

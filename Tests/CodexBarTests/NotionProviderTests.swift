@@ -42,16 +42,10 @@ struct NotionProviderTests {
         let pace = ProviderDescriptorRegistry.descriptor(for: .notion).pace
         let februaryCycle = try Self.monthlyWindow(
             usedPercent: 18,
-            resetsAt: Self.utcDate(
-                year: 2026,
-                month: 3,
-                day: 1))
+            resetsAt: Self.utcDate(year: 2026, month: 3, day: 1))
         let mayCycle = try Self.monthlyWindow(
             usedPercent: 18,
-            resetsAt: Self.utcDate(
-                year: 2026,
-                month: 6,
-                day: 1))
+            resetsAt: Self.utcDate(year: 2026, month: 6, day: 1))
 
         #expect(pace.resolvedResetWindowForPace(februaryCycle).windowMinutes == 28 * 24 * 60)
         #expect(pace.resolvedResetWindowForPace(mayCycle).windowMinutes == 31 * 24 * 60)

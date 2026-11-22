@@ -118,5 +118,7 @@ enum ProviderImplementationManifest {
         PluginCookieProviderImplementation(spec: OpenDesignProviderDescriptor.spec),
         SiliconFlowProviderImplementation(),
         PluginAPIKeyProviderImplementation(spec: TripoProviderDescriptor.spec),
+        PluginCookieProviderImplementation(spec: GoogleDeveloperProviderDescriptor.spec),
+        PluginAPIKeyProviderImplementation(spec: TrustedRouterProviderDescriptor.spec),
     ]
 }

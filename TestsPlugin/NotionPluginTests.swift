@@ -433,7 +433,7 @@ struct NotionPluginTests {
             return try (Data(body.utf8), #require(HTTPURLResponse(
                 url: url, statusCode: 200, httpVersion: nil, headerFields: nil)))
         })
-        _ = try strategy.loadedRuntime(contextOptions: .production, engine: engine)
+        try strategy.prepareRuntime(contextOptions: .production, engine: engine)
         for (enabled, expected) in [(true, "0" as String?), (false, nil), (true, "24"), (true, nil)] {
             let before = requests.values.count
             let context = ProviderFetchContext(
@@ -507,12 +507,12 @@ struct NotionPluginTests {
         usage: String,
         spaces: String = Self.spaces,
         status: Int = 200,
+        calls: Calls? = nil,
         credits: String = "{}",
         creditsStatus: Int = 200,
         creditsError: URLError.Code? = nil,
         requests: Calls? = nil,
-        expectedWorkspaceID: String = "11111111-2222-3333-4444-555555555555",
-        calls: Calls? = nil) throws
+        expectedWorkspaceID: String = "11111111-2222-3333-4444-555555555555") throws
         -> ProviderPluginRuntime
     {
         let creditCalls = Calls()

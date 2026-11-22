@@ -28,7 +28,6 @@ either way.
 
 > **Unsupported integration:** CodexBar uses Notion's internal, cookie-authenticated `/api/v3` endpoints.
 > These endpoints are not a supported public API and may change or break without notice.
-
 ## Requirements
 
 The usage allowance only exists on **Business** and **Enterprise** workspaces. Free, Plus, and personal
@@ -209,7 +208,7 @@ Other providers retain their existing budgets. Explicit cancellation still inter
 
 The debug probe reports only the available allowances, using Standard/Select or Rolling/Monthly labels.
 It disables optional workspace usage and retains its separate
-20-second outer deadline, so a premium lookup cannot delay that diagnostic.
+15-second outer deadline, so a premium lookup cannot delay that diagnostic.
 
 ### Pace
 

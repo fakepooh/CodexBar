@@ -33,6 +33,10 @@ allowance. ACL preflight metadata cannot authorize additional prompts. Automatic
 browsers once a provider accepts a session; missing or rejected sessions advance to the next browser in the
 provider's existing order. Explicit browser/profile selections keep their own scope.
 
+Chrome Dev participates in the shared browser order after Chrome Beta and Canary. It reads profiles from
+`Google/Chrome Dev` and uses Chrome's existing `Chrome Safe Storage` item. Selecting Chrome explicitly continues
+to select only Chrome; it does not include Chrome Dev.
+
 A denied browser prompt suppresses Chromium-family interactive retries for six hours, including repeated Refresh
 clicks in the menu or provider settings. Only `codexbar cookie refresh --allow-keychain-prompt` explicitly overrides
 that cooldown. An acknowledged Claude repair has its own user-action policy.
@@ -60,6 +64,10 @@ The process-local validation memo holds at most 64 confirmed signature rejection
 executable, enclosing app bundle metadata, bundle version, or main executable invalidate those rejections sooner.
 Outside the explicit operation memo, the current Keychain ACL and prompt selector are read on every preflight, and
 background secret reads remain non-interactive.
+
+Muse Code also checks the item's explicit signing-team partition list before reading its login token. A missing
+team uses the same explained manual-refresh allowance; unreadable partition metadata or signing identity stops
+before the secret read. The Muse CLI can reset that list on token refresh; see [Muse authentication](muse.md#authentication).
 
 Provider-owned child processes are a separate boundary. CodexBar may intentionally launch a provider CLI such as
 Claude for usage. That executable owns its credential behavior, which CodexBar cannot constrain or fully inspect.
